@@ -55,7 +55,7 @@ class ParseCsv {
             Pattern := Format('JS)(?<=^|{2}|{3})(?:{1}(?<value>(?:[^{1}]*(?:{1}{1}){0,1})*){1}'
             '|(?<value>[^\r\n{1}{2}{4}]*?))(?={2}|{3}(*MARK:item)|$(*MARK:end))'
             , Quote, FieldDelimiter, RecordDelimiter, RegExReplace(RecordDelimiter, '\\[rnR]|``r|``n', ''))
-        ; else 
+        ; else
             ; Pattern := Format('JS)(?<=^|{2})(?:{1}(?<value>(?:[^{1}]*(?:{1}{1}){0,1})*){1}'
             ; '|(?<value>[^{1}{2}{3}{4}]*?))(?={2}|$(*MARK:item))', Quote, FieldDelimiter)
         ; The Pattern above is designed to be used in situations where the RecordDelimiter is a newline,
@@ -84,6 +84,8 @@ class ParseCsv {
         }
         return this
     }
+
+    __Enum(VarCount) => this.Collection.__Enum(VarCount)
 
     GetField(match) {
         this.Fields[++this.Index] := match['value']
@@ -142,14 +144,14 @@ class ParseCsv {
     LoopReadLine() {
         local params := this.params, BPA := params.BreakpointAction, f := this.File, Collection := this.Collection
         if params.Breakpoint {
-            while !f.AtEOF {
-                while !f.AtEOF
-                    Collection.Add(StrSplit(f.ReadLine(), params.FieldDelimiter))
-                ; OutputDebug('`n' (++i) ': ' f.Pos '/' f.length)
-                this.Paused := true
-                if not BPA is Func || BPA(this)
-                    return
+            loop params.Breakpoint {
+                Collection.Add(StrSplit(f.ReadLine(), params.FieldDelimiter))
+                if f.AtEOF
+                    break
             }
+            this.Paused := true
+            if not BPA is Func || BPA(this)
+                return
         } else {
             while !f.AtEOF
                 Collection.Add(StrSplit(f.ReadLine(), params.FieldDelimiter))
@@ -198,7 +200,8 @@ class ParseCsv {
     LoopReadSplit() {
         local params := this.params, BPA := params.BreakpointAction, Collection := this.Collection
         if params.Breakpoint {
-            ; This should be configured in a way that requires the least number of operations to reach the breakpoint.
+            ; I wrote this block to use a method that, I believe, requires the fewest top-side calculations to accomplish the task.
+            ; Not sure what the interpreter does so I cannot say if it truly requires the fewest calculations.
             start := this.Collection.Count + 1
             if (i := params.Breakpoint - this.Content.Length) > 0 {
                 Loop {
@@ -252,8 +255,8 @@ class ParseCsv {
             return
         }
         if this.ReadStyle == 'Line' || params.MaxReadSizeBytes {
-            this.File.Read(1), this.bpc := this.File.Pos, this.File.Pos := 0
             this.File := FileOpen(params.PathIn, 'r', params.Encoding||unset)
+            this.File.Read(1), this.bpc := this.File.Pos, this.File.Pos := 0
             if this.ReadStyle == 'Line'
                 return
             this.Content := this.File.Read(params.MaxReadSizeBytes)
