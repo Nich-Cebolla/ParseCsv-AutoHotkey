@@ -24,6 +24,7 @@ class GenerateCSV {
         static MinWordsPerField := 0
         static MaxWordsPerField := 10
         static Headers := ''
+        static NoHeaders := false
         static Encoding := ''
         static OtherChars := '1234567890+_)(*&^%$#@!~``;/\|><.?'
         static OtherCharsProbability := 0.3 ; The probability a group of other chars is used instead of a word
@@ -59,13 +60,20 @@ class GenerateCSV {
         }
         if !params.RecordDelimiter
             params.RecordDelimiter := '`n'
-        if params.Headers {
-            OutStr .= params.Headers
-        } else {
-            Loop params.Columns
-                OutStr .= 'Column ' A_Index (A_Index == params.Columns ? '' : params.FieldDelimiter)
+        if !params.NoHeaders {
+            if params.Headers {
+                if not params.Headers is Array
+                    params.Headers := StrSplit(params.Headers, params.FieldDelimiter)
+                params.Columns := params.Headers.Length
+                for h in params.Headers
+                    OutStr .= h params.FieldDelimiter
+                OutStr := Trim(OutStr, params.FieldDelimiter) params.RecordDelimiter
+            } else {
+                Loop params.Columns
+                    OutStr .= 'Column ' A_Index (A_Index == params.Columns ? '' : params.FieldDelimiter)
+            }
+            OutStr .= params.RecordDelimiter
         }
-        OutStr .= params.RecordDelimiter
         if params.QuoteChar {
             Loop params.Rows {
                 r := A_Index
@@ -178,21 +186,28 @@ class GenerateCSV {
         }
     }
 }
-; This pattern correctly handles CSV.
-GetCsvPattern(Quote, FieldDelimiter, RecordDelimiter?) {
+; This pattern correctly handles CSV with quoted fields.
+GetPattern(Quote, FieldDelimiter, RecordDelimiter, Columns) {
     if RecordDelimiter
-        pattern := Format('JS)(?<=^|{2}|{3})(?:{1}(?<value>(?:[^{1}]*(?:{1}{1}){0,1})*){1}'
-        '|(?<value>[^\r\n{1}{2}{4}]*?))(?={2}|{3}(*MARK:item)|$(*MARK:end))'
-        , Quote, FieldDelimiter, RecordDelimiter, RegExReplace(RecordDelimiter, '(?:\\[rnR])+|[\[\]+*]', ''))
+        RD1 := RegExReplace(RecordDelimiter, '\\[rnR]|`r|`n', ''), RD2 := RD1||'[\r\n]+'
     else
-        pattern := Format('JS)(?<=^|{2})(?:{1}(?<value>(?:[^{1}]*(?:{1}{1}){0,1})*){1}'
-        '|(?<value>[^{1}{2}{3}{4}]*?))(?={2}|$(*MARK:item))', Quote, FieldDelimiter)
+        RD1 := '', RD2 := '[\r\n]+'
+    pattern := Format('JS)(?<=^|{1})', RecordDelimiter??'[\r\n]')
+    part := Format('(?:({1}(?:[^{1}]*+(?:{1}{1})*+)*+{1}|[^\r\n{1}{2}{3}]*+){2})', Quote, FieldDelimiter, RD1)
+    ; I decided to use a loop to dynamically construct the pattern, instead of a recursive pattern,
+    ; because it allows us to capture every field in each record all at once. This works for CSV
+    ; since we know how many fields there will be per record after getting the headers.
+    Loop Columns - 1
+        pattern .= part
+    pattern .= Format('({1}(?:[^{1}]*+(?:{1}{1})*+)*+{1}|[^\r\n{1}{2}{3}]*+)(?:{4}|$(*MARK:end))'
+    , Quote, FieldDelimiter, RD1, RD2)
     try
-        RegExMatch(' ', pattern)
+        RegExMatch(' ', Pattern)
     catch Error as err {
         if err.message == 'Compile error 25 at offset 6: lookbehind assertion is not fixed length'
-            throw Error('The procedure received "Compile error 25 at offset 6: lookbehind assertion is not fixed length".'
-            ' To fix this, change the RecordDelimiter and/or FieldDelimiter to a value that is a fixed length.', -1)
+            throw Error('The procedure received "Compile error 25 at offset 6: lookbehind assertion'
+            ' is not fixed length". To fix this, change the ``RecordDelimiter`` and/or ``FieldDelimiter``'
+            ' to a value that is a fixed length.', -1)
         else
             throw err
     }
