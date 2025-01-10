@@ -6,7 +6,7 @@ class ParseCsv {
         static CollectionArrayBuffer := 1000
         static Constructor := ''
         static Encoding := ''
-        static FieldDelimiter := ','
+        static FieldDelimiter := ''
         static Headers := ''
         static MaxReadSizeBytes := 0
         static PathIn := ''
