@@ -6,7 +6,7 @@ class ParseCsv {
         static CollectionArrayBuffer := 1000
         static Constructor := ''
         static Encoding := ''
-        static FieldDelimiter := ''
+        static FieldDelimiter := ','
         static Headers := ''
         static MaxReadSizeBytes := 0
         static PathIn := ''
@@ -156,10 +156,9 @@ class ParseCsv {
         try
             RegExMatch(' ', Pattern)
         catch Error as err {
-            if err.message == 'Compile error 25 at offset 6: lookbehind assertion is not fixed length'
-                throw Error('The procedure received "Compile error 25 at offset 6: lookbehind assertion'
-                ' is not fixed length". To fix this, change the ``RecordDelimiter`` and/or ``FieldDelimiter``'
-                ' to a value that is a fixed length.', -1)
+            if InStr(err.Message, 'Compile error 25')
+                throw Error('The procedure received "' err.Message '". To fix this, change the'
+                ' ``RecordDelimiter`` and/or ``FieldDelimiter`` to a value that is a fixed length.', -1)
             else
                 throw err
         }
@@ -589,7 +588,7 @@ class ParseCsv {
             else
                 throw UnsetItemError('The array does not have a value at index ' index, -1)
         }
-        Has(index) => this.__Collection.Has(index < 0 ? this.Count + index + 1 : index)
+        Has(index) => index && this.__Collection.Has(index < 0 ? this.Count + index + 1 : index)
         InsertAt(index, val*) {
             this.Count += val.Length
             this.__Collection.InsertAt(index < 0 ? this.Count + index + 1 : index, val*)
@@ -647,4 +646,3 @@ class ParseCsv {
         }
     }
 }
-
