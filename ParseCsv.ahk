@@ -27,6 +27,7 @@ class ParseCsv {
     }
 
     Fields := [], Index := 0, CharPos := 1, ContentLength := 0, Paused := 0, InputString := 0, Complete := 0
+    __Item[Index] => this.Collection[Index]
     /**
      * @param {Object} [params] - An object with key:val pairs containin input parameters.
      * @property {Integer} [Breakpoint] - The number of records to parse before the `BreakpointAction`
