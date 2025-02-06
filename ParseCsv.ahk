@@ -290,10 +290,10 @@ class ParseCsv {
                 throw ValueError(Format('Invalid CSV format. `nThe current match should have began'
                 ' at position {1}, but the match occurred at position {2}.`nThe invalid matched'
                 ' content:`n{3}', this.CharPos, match.Pos, match[0]), -1)
-            Headers := [], Headers.Length := this.RecordLength
+            Fields := [], Fields.Length := this.RecordLength
             loop this.RecordLength
-                Headers[A_Index] := match[A_Index]
-            Collection.__Add(Headers)
+                Fields[A_Index] := Trim(match[A_Index], '"\')
+            Collection.__Add(Fields)
             this.CharPos := match.Pos + match.len
         }
         _Read() {
@@ -478,7 +478,7 @@ class ParseCsv {
 
         _SetHeadersLoopReadQuote() {
             PatternHeader := Format('JS)(?:{1}(?<value>(?:[^{1}]*+(?:{1}{1})*+)*+){1}|'
-            '(?<value>[^\r\n{1}{2}{3}]*+))(?:{2}|{4}(*MARK:record)|$(*MARK:end))'
+            '(?<value>[^\r\n{1}{2}{3}]*+))(?:{2}|{4}(*MARK:record)|$(*MARK:end))|(?:{2}$(*MARK:end))'
             , params.QuoteChar, params.FieldDelimiter
             , params.RecordDelimiter ? RegExReplace(params.RecordDelimiter, '\\[rnR]|`r|`n', '') : ''
             , params.RecordDelimiter||'[\r\n]+')
@@ -646,3 +646,4 @@ class ParseCsv {
         }
     }
 }
+
