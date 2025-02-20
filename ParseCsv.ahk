@@ -1,3 +1,4 @@
+#Requires AutoHotkey >=2.0.17
 
 class ParseCsv {
     class Params {
