@@ -141,11 +141,12 @@ class ParseCsv {
      * @returns {String} - Returns the pattern that will parse the CSV according to the input values.
      */
     static GetPattern(Quote, FieldDelimiter, RecordDelimiter, Columns) {
+        RecordDelimiter := StrReplace(StrReplace(RecordDelimiter, '`n', '\n'), '`r', '\r')
         if RecordDelimiter
             RD1 := RegExReplace(RecordDelimiter, '\\[rnR]|`r|`n', ''), RD2 := RD1||'[\r\n]+'
         else
             RD1 := '', RD2 := '[\r\n]+'
-        pattern := Format('JS)(?<=^|{1})', RecordDelimiter??'[\r\n]')
+        pattern := Format('JS)(?<=^|{1})', RecordDelimiter||'[\r\n]')
         part := Format('(?:({1}(?:[^{1}]*+(?:{1}{1})*+)*+{1}|[^\r\n{1}{2}{3}]*+){2})', Quote, FieldDelimiter, RD1)
         ; I decided to use a loop to dynamically construct the pattern, instead of a recursive pattern,
         ; because it allows us to capture every field in each record all at once. This works for CSV
@@ -154,6 +155,7 @@ class ParseCsv {
             pattern .= part
         pattern .= Format('({1}(?:[^{1}]*+(?:{1}{1})*+)*+{1}|[^\r\n{1}{2}{3}]*+)(?:{4}|$(*MARK:end))'
         , Quote, FieldDelimiter, RD1, RD2)
+        A_Clipboard := pattern
         try
             RegExMatch(' ', Pattern)
         catch Error as err {
@@ -482,7 +484,9 @@ class ParseCsv {
             '(?<value>[^\r\n{1}{2}{3}]*+))(?:{2}|{4}(*MARK:record)|$(*MARK:end))|(?:{2}$(*MARK:end))'
             , params.QuoteChar, params.FieldDelimiter
             , params.RecordDelimiter ? RegExReplace(params.RecordDelimiter, '\\[rnR]|`r|`n', '') : ''
-            , params.RecordDelimiter||'[\r\n]+')
+            , params.RecordDelimiter ? StrReplace(StrReplace(params.RecordDelimiter, '`n', '\n'), '`r', '\r') : '[\r\n]+')
+            A_Clipboard := PatternHeader
+            sleep 1
             headers := [], pos := 1
             while RegExMatch(this.Content, PatternHeader, &match, pos) {
                 if match.Pos != pos
@@ -647,4 +651,3 @@ class ParseCsv {
         }
     }
 }
-
