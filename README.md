@@ -2,7 +2,7 @@
 An all-purpose, easy-to-use CSV parser.
 
 # Introduction
-I haven't written the documentation for this yet, but it is very easy to use. Set the parameters by using the ParseCsvConfig.ahk file, Then call `result := ParseCsv()`, or passing an object with the params to the first parameter `result := ParseCsv(ParamsObject)`.  The records will be on the `result.Collection` object. `result.Collection` is a composition of `Array`, and the objects contained in the array are each compositions of `Map`, so you can access the objects and items in the usual ways:
+I haven't written the documentation for this yet, but it is very easy to use. Set the parameters by using the ParseCsvConfig.ahk file, Then call `result := ParseCsv()`, or passing an object with the params to the first parameter `result := ParseCsv(ParamsObject)`. 
 ```ahk
 CsvPath := 'C:\Users\MyName\Downloads\MyCsv.csv'
 
