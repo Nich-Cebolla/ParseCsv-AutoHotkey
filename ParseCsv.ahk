@@ -114,7 +114,7 @@ class ParseCsv {
      * an error. But if the endings do not matter for `ParseCsv`'s operation, it will still
      * parse the input.
      * @property {Boolean} [Start] - If true, the procedure is called immediately upon instantiation.
-     * If false, you will receive an instane of `ParseCsv` and you can controll it at-will by calling
+     * If false, you will receive an instance of `ParseCsv` and you can controll it at-will by calling
      * any of its methods.
      * @param {string} [InputString] - A string to parse. If not set, the file at `PathIn` is used.
      */
@@ -137,6 +137,21 @@ class ParseCsv {
         }
         if params.Start
             this()
+    }
+    /**
+     * @description - Returns the count for the respective input.
+     * - "Records" or "R" - the count for how many records currently exist in instance.Collection
+     * - "Headers" or "H" - the count for how many headers exist in instance.Headers
+     */
+    Count[Which := 'R'] {
+        Get {
+            if (W := SubStr(Which, 1, 1)) = 'R'
+                return this.Collection.Length
+            else if W = 'H'
+                return this.Headers.Length
+            else
+                throw ValueError('Unexpected input for ``Which``.', -1, 'Specifically: ' Which)
+        }
     }
     /**
      * @returns {String} - Returns the pattern that will parse the CSV according to the input values.
@@ -205,6 +220,397 @@ class ParseCsv {
         this.Collection.__Collection.Length := this.Collection.Count
         this.Collection := this.Collection.__Collection
     }
+    /**
+     * @description - Searches the CSV for the first field which contains the input string
+     * and returns the index number of the record which contains the field.
+     * @param {String} StrToFind - The string to find.
+     * @param {String|Integer|Array} [Headers] -
+     * - If a string, the header name to search within.
+     * - If an integer, the index value of the header to search within. If using an integer to refer
+     * to a header by index, its type must be `Number` or `Integer`, and not `String`. If it is a
+     * `String`, it will be considered a header name and not an index number.
+     * - If an array, an array of integers or strings as described above. These will be searched
+     * in the order they are in the array.
+     * - If unset, all headers will be searched.
+     * @param {Integer} [IndexStart=1] - The record index number to start searching from.
+     * @param {Integer} [IndexEnd] - The record index number to end searching at. If unset, the
+     * all records after and including IndexStart are searched.
+     * @param {Boolean} [RequireFullMatch=true] - If true, the field must match the input string
+     * exactly. If false, the field must contain the input string.
+     * @param {Boolean} [CaseSensitive=false] - If true, the search is case-sensitive. If false,
+     * the search is case-insensitive.
+     * @param {Integer} [StartingPos] - This is only used when `RequireFullMatch` is false. The
+     * position of the field's string (in number of characters) to search within. This is passed
+     * to `InStr`.
+     * @param {VarRef} [OutField] - This variable will receive the string value of the field that
+     * contains the input string.
+     * @param {VarRef} [OutHeader] - This variable will receive the string value of the header name
+     * that contains the field that contains the input string.
+     * @returns {Integer} - The index number of the record which satisfies the conditions set by
+     * the input parameters.
+     */
+    Find(StrToFind, Headers?, IndexStart := 1, IndexEnd?, RequireFullMatch := true
+    , CaseSensitive := false, StartingPos := 1, &OutField?, &OutHeader?) {
+        if !IsSet(IndexEnd)
+            IndexEnd := this.Count['R']
+        Headers := this.__GetHeaders(Headers ?? unset)
+        if RequireFullMatch
+            Process := CaseSensitive ? _Process_RFM_CS : _Process_RFM
+        else
+            Process := _Process
+        i := IndexStart - 1
+        while ++i <= IndexEnd {
+            for Header in Headers {
+                if Process(&Header) {
+                    OutHeader := Header
+                    OutField := this[i][Header]
+                    return i
+                }
+            }
+        }
+        _Process(&Header) => InStr(this[i][Header], StrToFind, CaseSensitive, StartingPos)
+        _Process_RFM(&Header) => this[i][Header] = StrToFind
+        _Process_RFM_CS(&Header) => this[i][Header] == StrToFind
+    }
+    /**
+     * @description - Iterates the fields in the CSV, passing the values to a callback function.
+     * When the function returns true, this function returns the index number of the record.
+     * @param {Func|BoundFunc|Closure} Callback - The callback function. When the function returns
+     * any true value, this function also returns. The function can accept up to four parameters:
+     * - {String} The current field's value
+     * - {Integer} The current record index number
+     * - {String} The current header name
+     * @param {String|Integer|Array} [Headers] -
+     * - If a string, the header name to search within.
+     * - If an integer, the index value of the header to search within. If using an integer to refer
+     * to a header by index, its type must be `Number` or `Integer`, and not `String`. If it is a
+     * `String`, it will be considered a header name and not an index number.
+     * - If an array, an array of integers or strings as described above. These will be searched
+     * in the order they are in the array.
+     * - If unset, all headers will be searched.
+     * @param {Integer} [IndexStart=1] - The record index number to start searching from.
+     * @param {Integer} [IndexEnd] - The record index number to end searching at. If unset, the
+     * all records after and including IndexStart are searched.
+     * @param {VarRef} [OutField] - This variable will receive the string value of the field that
+     * contains the input string.
+     * @param {VarRef} [OutHeader] - This variable will receive the string value of the header name
+     * that contains the field that contains the input string.
+     * @returns {Integer} - The index number of the record that contains the field that was passed
+     * to the function when the function returned true.
+     */
+    FindF(Callback, Headers?, IndexStart := 1, IndexEnd?, &OutField?, &OutHeader?) {
+        if !IsSet(IndexEnd)
+            IndexEnd := this.Count['R']
+        Headers := this.__GetHeaders(Headers ?? unset)
+        i := IndexStart - 1
+        while ++i <= IndexEnd {
+            for Header in Headers {
+                if Callback(this[i][Header], i, Header) {
+                    OutHeader := Header
+                    OutField := this[i][Header]
+                    return i
+                }
+            }
+        }
+    }
+    /**
+     * @description - Searches the CSV for a field that matches with the input pattern using
+     * `RegExMatch`.
+     * @param {String} Pattern - The Regular Expression pattern to match with.
+     * @param {String|Integer|Array} [Headers] -
+     * - If a string, the header name to search within.
+     * - If an integer, the index value of the header to search within. If using an integer to refer
+     * to a header by index, its type must be `Number` or `Integer`, and not `String`. If it is a
+     * `String`, it will be considered a header name and not an index number.
+     * - If an array, an array of integers or strings as described above. These will be searched
+     * in the order they are in the array.
+     * - If unset, all headers will be searched.
+     * @param {Integer} [IndexStart=1] - The record index number to start searching from.
+     * @param {Integer} [IndexEnd] - The record index number to end searching at. If unset, the
+     * all records after and including IndexStart are searched.
+     * @param {Integer} [StartingPos=1] - The position within the field (in number of characters)
+     * to begin searching for a match. This is passed directly to `RegExMatch`.
+     * @param {VarRef} [OutMatch] - This variable will receive the `RegExMatchInfo` object.
+     * @param {VarRef} [OutField] - This variable will receive the string value of the field that
+     * contains the input string.
+     * @param {VarRef} [OutHeader] - This variable will receive the string value of the header name
+     * that contains the field that contains the input string.
+     * @returns {Integer} - The index number of the record that contains the field that matched
+     * the pattern.
+     */
+    FindR(Pattern, Headers?, IndexStart := 1, IndexEnd?, StartingPos := 1, &OutMatch?, &OutField?, &OutHeader?) {
+        if !IsSet(IndexEnd)
+            IndexEnd := this.Count['R']
+        Headers := this.__GetHeaders(Headers ?? unset)
+        i := IndexStart - 1
+        while ++i <= IndexEnd {
+            for Header in Headers {
+                if RegExMatch(this[i][Header], Pattern, &OutMatch, StartingPos) {
+                    OutHeader := Header
+                    OutField := this[i][Header]
+                    return i
+                }
+            }
+        }
+    }
+    /**
+     * @description - Loops the CSV between `IndexStart` and `IndexEnd`, adding the results from
+     * `Find` to an array. When multiple headers are included in the search, the csv is
+     * iterated by searching all the records between IndexStart and IndexEnd for one header before
+     * moving on to the next header. The arrays themselves are added to a `Map` object, where the
+     * key is the header as it is passed to the `Headers` parameter (meaning if indices are used, the
+     * keys are integers, else the keys are strings), and the value is the array. If the `Find`
+     * method does not return a value for a given header, the key is excluded from the resulting
+     * `Map` object.
+     * @param {String} StrToFind - The string to find.
+     * @param {String|Integer|Array} [Headers] -
+     * - If a string, the header name to search within.
+     * - If an integer, the index value of the header to search within. If using an integer to refer
+     * to a header by index, its type must be `Number` or `Integer`, and not `String`. If it is a
+     * `String`, it will be considered a header name and not an index number.
+     * - If an array, an array of integers or strings as described above. These will be searched
+     * in the order they are in the array.
+     * - If unset, all headers will be searched.
+     * @param {Integer} [IndexStart=1] - The record index number to start searching from.
+     * @param {Integer} [IndexEnd] - The record index number to end searching at. If unset, the
+     * all records after and including IndexStart are searched.
+     * @param {Boolean} [RequireFullMatch=true] - If true, the field must match the input string
+     * exactly. If false, the field must contain the input string.
+     * @param {Boolean} [CaseSensitive=false] - If true, the search is case-sensitive. If false,
+     * the search is case-insensitive.
+     * @param {Integer} [StartingPos] - This is only used when `RequireFullMatch` is false. The
+     * position of the field's string (in number of characters) to search within. This is passed
+     * to `InStr`.
+     * @param {Boolean} [IncludeField=true] - If true, the field value is included in the output.
+     * If false, the output only includes the index numbers.
+     * @returns {Map} - If the method returns a value at least one time, this returns a map object
+     * with the following characteristics:
+     * - The keys contained in the object are header names, unless indices are passed to `Headers`,
+     * then the keys are those values.
+     * - The values depend on the value of `IncludeField`. When `IncludeField` is true, the values
+     * are arrays of objects with properties { Field, Index }. When false, The values are arrays of
+     * integers which are returned by `Find`.
+     * If no values are returned by `Find`, this returns an empty string.
+     */
+    FindAll(StrToFind, Headers?, IndexStart := 1, IndexEnd?, RequireFullMatch := true
+    , CaseSensitive := false, StartingPos := 1, IncludeField := true) {
+        return this.__FindAll(
+            _Process.Bind(StrToFind, IndexStart, IndexEnd ?? this.Count['R']
+                , RequireFullMatch, CaseSensitive, StartingPos, IncludeField
+            )
+            , Headers ?? unset
+        )
+        _Process(StrToFind, IndexStart, IndexEnd, RequireFullMatch, CaseSensitive, StartingPos, IncludeField, &Header) {
+            local Result := [], Field
+            Add := IncludeField ? () => Result.Push({ Index: i, Field: Field }) : () => Result.Push(i)
+            i := IndexStart
+            while i <= IndexEnd {
+                if i := this.Find(StrToFind, Header, i, IndexEnd, RequireFullMatch, CaseSensitive, StartingPos, &Field)
+                    Add()
+                else
+                    break
+                i++
+            }
+            return Result.Length ? Result : ''
+        }
+    }
+    
+    /**
+     * @description - Loops the CSV between `IndexStart` and `IndexEnd`, adding the results from
+     * `FindF` to an array. When multiple headers are included in the search, the csv is
+     * iterated by searching all the records between IndexStart and IndexEnd for one header before
+     * moving on to the next header. The arrays themselves are added to a `Map` object, where the
+     * key is the header as it is passed to the `Headers` parameter (meaning if indices are used, the
+     * keys are integers, else the keys are strings), and the value is the array. If the `FindF`
+     * method does not return a value for a given header, the key is excluded from the resulting
+     * `Map` object.
+     * @param {Func|BoundFunc|Closure} Callback - The callback function passed to `FindF`. When the
+     * function returns any true value, the result from `FindF` is added to an array.
+     * The function can accept up to four parameters:
+     * - {String} The current field's value
+     * - {Integer} The current record index number
+     * - {String} The current header name
+     * @param {String|Integer|Array} [Headers] -
+     * - If a string, the header name to search within.
+     * - If an integer, the index value of the header to search within. If using an integer to refer
+     * to a header by index, its type must be `Number` or `Integer`, and not `String`. If it is a
+     * `String`, it will be considered a header name and not an index number.
+     * - If an array, an array of integers or strings as described above. These will be searched
+     * in the order they are in the array.
+     * - If unset, all headers will be searched.
+     * @param {Integer} [IndexStart=1] - The record index number to start searching from.
+     * @param {Integer} [IndexEnd] - The record index number to end searching at. If unset, the
+     * all records after and including IndexStart are searched.
+     * @param {Boolean} [IncludeField=true] - If true, the field value is included in the output.
+     * If false, the output only includes the index numbers.
+     * @returns {Map} - If the method returns a value at least one time, this returns a map object
+     * with the following characteristics:
+     * - The keys contained in the object are header names, unless indices are passed to `Headers`,
+     * then the keys are those values.
+     * - The values depend on the value of `IncludeField`. When `IncludeField` is true, the values
+     * are arrays of objects with properties { Field, Index }. When false, The values are arrays of
+     * integers which are returned by `FindF`.
+     * If no values are returned by `FindF`, this returns an empty string.
+     */
+    FindAllF(Callback, Headers?, IndexStart := 1, IndexEnd?, IncludeField := true) {
+        return this.__FindAll(
+            _Process.Bind(Callback, IndexStart, IndexEnd ?? this.Count['R'], IncludeField)
+            , Headers ?? unset
+        )
+        _Process(Callback, IndexStart, IndexEnd, IncludeField, &Header) {
+            local Result := [], Field
+            i := IndexStart
+            Add := IncludeField ? () => Result.Push({ Index: i, Field: Field }) : () => Result.Push(i)
+            while i <= IndexEnd {
+                i := this.FindF(Callback, Header, i, IndexEnd, &Field)
+                if i
+                    Add()
+                else
+                    break
+                i++
+            }
+            return Result.Length ? Result : ''
+        }
+    }
+    
+    /**
+     * @description - Loops the CSV between `IndexStart` and `IndexEnd`, adding the results from
+     * `FindR` to an array. When multiple headers are included in the search, the csv is
+     * iterated by searching all the records between IndexStart and IndexEnd for one header before
+     * moving on to the next header. The arrays themselves are added to a `Map` object, where the
+     * key is the header as it is passed to the `Headers` parameter (meaning if indices are used, the
+     * keys are integers, else the keys are strings), and the value is the array. If the `FindR`
+     * method does not return a value for a given header, the key is excluded from the resulting
+     * `Map` object.
+     * @param {String} Pattern - The Regular Expression pattern to match with.
+     * @param {String|Integer|Array} [Headers] -
+     * - If a string, the header name to search within.
+     * - If an integer, the index value of the header to search within. If using an integer to refer
+     * to a header by index, its type must be `Number` or `Integer`, and not `String`. If it is a
+     * `String`, it will be considered a header name and not an index number.
+     * - If an array, an array of integers or strings as described above. These will be searched
+     * in the order they are in the array.
+     * - If unset, all headers will be searched.
+     * @param {Integer} [IndexStart=1] - The record index number to start searching from.
+     * @param {Integer} [IndexEnd] - The record index number to end searching at. If unset, the
+     * all records after and including IndexStart are searched.
+     * @param {Integer} [StartingPos=1] - The position within the field (in number of characters)
+     * to begin searching for a match. This is passed directly to `RegExMatch`.
+     * @param {Boolean} [IncludeMatch=true] - If true, the match object is included in the output.
+     * @param {Boolean} [IncludeField=true] - If true, the field value is included in the output.
+     * @returns {Map} - If the method returns a value at least one time, this returns a map object
+     * with the following characteristics:
+     * - The keys contained in the object are header names, unless indices are passed to `Headers`,
+     * then the keys are those values.
+     * - The values depend on the value of `IncludeMatch` and `IncludeField`. When one or both of
+     * `IncludeMatch` or `IncludeField` is true, the values are arrays of objects with the respective
+     * properties { Field, Index, Match }. When both are false, The values are arrays of integers
+     * which are returned by `FindR`.
+     * If no values are returned by `FindR`, this returns an empty string.
+     */
+    FindAllR(Pattern, Headers?, IndexStart := 1, IndexEnd?, StartingPos := 1, IncludeMatch := true, IncludeField := true) {
+        return this.__FindAll(_Process.Bind(
+                Pattern, IndexStart, IndexEnd ?? this.Count['R'], StartingPos, IncludeMatch, IncludeField
+            )
+            , Headers ?? unset
+        )
+        _Process(Pattern, IndexStart, IndexEnd, StartingPos, IncludeMatch, IncludeField, &Header) {
+            local Result := [], Match, Field
+            i := IndexStart
+            if IncludeMatch
+                Add := IncludeField ? () => Result.Push({ Index: i, Match: Match , Field: Field }) : () => Result.Push({ Index: i, Match: Match })
+            else
+                Add := IncludeField ? () => Result.Push({ Index: i, Field: Field }) : () => Result.Push(i)
+            while i <= IndexEnd {
+                i := this.FindR(Pattern, Header, i, IndexEnd, StartingPos, &Match, &Field)
+                if i
+                    Add()
+                else
+                    break
+                i++
+            }
+            return Result.Length ? Result : ''
+        }
+    }
+
+    /** @description - Used internally when any of `FindAll`, `FindAllF`, or `FindAllR` are called. */
+    __FindAll(Callback, Headers?) {
+        if IsSet(Headers) {
+            if not Headers is Array
+                Headers := [Headers]
+        } else
+            Headers := this.Headers
+        Result := Map()
+        for Header in Headers
+            Result.Set(Header, Callback(&Header) || unset)
+        return Result.Count ? Result : ''
+    }
+    /** @description - Used internally when any of `Find`, `FindF`, or `FindR` are called */
+    __GetHeaders(Headers?) {
+        if IsSet(Headers) {
+            if not Headers is Array
+                Headers := [Headers]
+            Result := []
+            for Header in Headers
+                Result.Push(Header is Number ? this.Headers[Header] : Header)
+            return Result
+        } else
+            return this.Headers
+    }
+
+    /**
+     * @description - Loops the CSV between IndexStart and IndexEnd. For each record, combines the
+     * fields into a string separated by a delimiter. If joining multiple records, the records
+     * are separated by a newline. Note that, if a quote character was included in the input parameters
+     * when `ParseCsv` was called, the fields will be enclosed by the quote character, and internal
+     * quote characters will be escaped by doubling them. This will occur for all fields, whether
+     * or not the field was originally quoted in the input content.
+     * @param {Integer} [IndexStart=1] - The starting record index.
+     * @param {Integer} [IndexEnd] - The ending record index. If unset, the last record is used.
+     * @param {String|Integer|Array} [Headers] -
+     * - If a string, the header name to search within.
+     * - If an integer, the index value of the header to search within. If using an integer to refer
+     * to a header by index, its type must be `Number` or `Integer`, and not `String`. If it is a
+     * `String`, it will be considered a header name and not an index number.
+     * - If an array, an array of integers or strings as described above. These will be searched
+     * in the order they are in the array.
+     * - If unset, all headers will be searched.
+     * @param {Boolean} [IncludeHeaders=false] - If true, the headers are included in the output as
+     * the first line.
+     * @param {String} [Delimiter] - The string to use to separate the fields. If unset, this uses
+     * the `FieldDelimiter` that was assigned when `ParseCsv` was called
+     * @param {String} [Newline='`r`n'] - The string to use to separate the records.
+     * @returns {String} - The combined string.
+     */
+    Join(IndexStart := 1, IndexEnd?, Headers?, IncludeHeaders := false, Delimiter := this.Params.FieldDelimiter, Newline := '`r`n') {
+        if !IsSet(IndexEnd)
+            IndexEnd := this.Count['R']
+        Headers := this.__GetHeaders(Headers ?? unset)
+        i := IndexStart - 1
+        quote := this.Params.QuoteChar
+        Add := this.Params.QuoteChar ? _AddWithQuote : _Add
+        if IncludeHeaders {
+            if this.Params.QuoteChar {
+                for Header in Headers
+                    Str .= Delimiter quote StrReplace(Header, quote, quote quote) quote
+            } else {
+                for Header in Headers {
+                    Str .= Delimiter Header
+                }
+            }
+            Str := SubStr(Str, StrLen(Delimiter) + 1) Newline
+        }
+        while ++i <= IndexEnd {
+            for header in Headers
+                Str .= Add(&Header)
+            Str .= Newline
+        }
+        return SubStr(Str, 1, StrLen(Str) - StrLen(Newline))
+
+        _Add(&Header) => (A_Index == 1 ? '' : Delimiter) this[i][header]
+        _AddWithQuote(&Header) => (A_Index == 1 ? '' : Delimiter) quote StrReplace(this[i][header], quote, quote quote) quote
+    }
+
     /** @returns {Float} - Returns the progress of the parsing procedure as a float between 0 and 1. */
     GetProgress() {
         if this.ReadStyle == 'Line'
@@ -295,8 +701,12 @@ class ParseCsv {
                 ' at position {1}, but the match occurred at position {2}.`nThe invalid matched'
                 ' content:`n{3}', this.CharPos, match.Pos, match[0]), -1)
             Fields := [], Fields.Length := this.RecordLength
-            loop this.RecordLength
-                Fields[A_Index] := Trim(match[A_Index], '"\')
+            loop this.RecordLength {
+                if SubStr(match[A_Index], 1, 1) == this.params.QuoteChar && SubStr(match[A_Index], -1, 1) == this.params.QuoteChar
+                    Fields[A_Index] :=  SubStr(match[A_Index], 2, match.Len[A_Index] - 2)
+                else
+                    Fields[A_Index] := match[A_Index]
+            }
             Collection.__Add(Fields)
             this.CharPos := match.Pos + match.len
         }
