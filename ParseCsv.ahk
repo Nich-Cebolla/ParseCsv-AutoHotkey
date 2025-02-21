@@ -171,7 +171,6 @@ class ParseCsv {
             pattern .= part
         pattern .= Format('({1}(?:[^{1}]*+(?:{1}{1})*+)*+{1}|[^\r\n{1}{2}{3}]*+)(?:{4}|$(*MARK:end))'
         , Quote, FieldDelimiter, RD1, RD2)
-        A_Clipboard := pattern
         try
             RegExMatch(' ', Pattern)
         catch Error as err {
