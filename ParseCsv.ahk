@@ -1,11 +1,13 @@
 #Requires AutoHotkey >=2.0.17
 
+
 class ParseCsv {
     class Params {
         static Breakpoint := 0
         static BreakpointAction := ''
         static CollectionArrayBuffer := 1000
         static Constructor := ''
+        static DisableLineEndingCheck := false
         static Encoding := ''
         static FieldDelimiter := ','
         static Headers := ''
@@ -88,6 +90,11 @@ class ParseCsv {
      * prefer that these are not case sensitive, see the documentation for a code block that sets
      * all map objects to case-insensitive by default. All other methods available to map objects
      * are also available to `ParseCsv.Record` objects.
+     * @property {Boolean} [DisableLineEndingCheck] - If the `RecordDelimiter` does not match the
+     * line endings within the input content, an error may occur during procesing. If this occurs,
+     * and if `DisableLineEndingCheck` is false, the `ParseCsv` will check the line endings and display
+     * the information in a message box prior to throwing the error. If `DisableLineEndingCheck` is
+     * true, the error is thrown without the additional message box.
      * @property {string} [Encoding] - The encoding of the file. If not set, the default encoding is used.
      * @property {string} [FieldDelimiter] - The string that separates fields. For example, a comma.
      * @property {string|Array} [Headers] - If set, the headers are used to create the `ParseCsv.Record`
@@ -171,6 +178,7 @@ class ParseCsv {
             pattern .= part
         pattern .= Format('({1}(?:[^{1}]*+(?:{1}{1})*+)*+{1}|[^\r\n{1}{2}{3}]*+)(?:{4}|$(*MARK:end))'
         , Quote, FieldDelimiter, RD1, RD2)
+        A_Clipboard := pattern
         try
             RegExMatch(' ', Pattern)
         catch Error as err {
@@ -544,7 +552,7 @@ class ParseCsv {
             Result.Set(Header, Callback(&Header) || unset)
         return Result.Count ? Result : ''
     }
-    /** @description - Used internally when any of `Find`, `FindF`, or `FindR` are called */
+    /** @description - Used internally when any of `Find`, `FindF`, `FindR`, or `Join` are called */
     __GetHeaders(Headers?) {
         if IsSet(Headers) {
             if not Headers is Array
@@ -899,8 +907,20 @@ class ParseCsv {
             sleep 1
             headers := [], pos := 1
             while RegExMatch(this.Content, PatternHeader, &match, pos) {
-                if match.Pos != pos
-                    throw ValueError('There is a formatting error near position ' pos, -1)
+                if match.Pos != pos {
+                    if !this.Params.DisableLineEndingCheck {
+                        MsgBox((
+                            'There is a formatting error near position ' pos '`r`n'
+                            'This may be caused by incorrect line endings.`r`n'
+                            this.__CheckLineEndings()
+                            'To disable this message (so only the error is thrown), set'
+                            ' ``DisableLineEndingCheck`` to true on the input parameters.`r`n'
+                            'The script will now exit.'
+                        ))
+                    }
+                    throw ValueError('There is a formatting error near position ' pos '. This may be'
+                    ' caused by line endings that do not match with ``RecordDelimiter``.', -1)
+                }
                 pos := match.Pos + match.len
                 headers.Push(match['value'])
                 h .= match[0]
@@ -917,6 +937,16 @@ class ParseCsv {
                 }
             }
         }
+    }
+    __CheckLineEndings() {
+        StrReplace(this.Content, '`r', , , &CRCount)
+        StrReplace(this.Content, '`n', , , &LFCount)
+        return (
+            '``RecordDelimiter`` = "' StrReplace(StrReplace(this.Params.RecordDelimiter, '`r', '``r')
+            , '`n', '``n') '".`r`n'
+            'CR Count = ' CRCount '.`r`n'
+            'LF Count = ' LFCount '.`r`n'
+        )
     }
 
     class Collection {
