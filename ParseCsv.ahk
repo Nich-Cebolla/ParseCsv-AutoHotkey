@@ -1,3 +1,9 @@
+/*
+    Github: https://github.com/Nich-Cebolla/ParseCsv-AutoHotkey/blob/main/ParseCsv.ahk
+    Author: Nich-Cebolla
+    Version: 1.0.0
+    License: MIT
+*/
 #Requires AutoHotkey >=2.0.17
 
 
@@ -224,8 +230,7 @@ class ParseCsv {
     End() {
         if this.HasOwnProp('File')
             this.File.Close()
-        this.Collection.__Collection.Length := this.Collection.Count
-        this.Collection := this.Collection.__Collection
+        this.Collection.Capacity := this.Collection.Length
     }
     /**
      * @description - Searches the CSV for the first field which contains the input string
@@ -421,7 +426,7 @@ class ParseCsv {
             return Result.Length ? Result : ''
         }
     }
-    
+
     /**
      * @description - Loops the CSV between `IndexStart` and `IndexEnd`, adding the results from
      * `FindF` to an array. When multiple headers are included in the search, the csv is
@@ -479,7 +484,7 @@ class ParseCsv {
             return Result.Length ? Result : ''
         }
     }
-    
+
     /**
      * @description - Loops the CSV between `IndexStart` and `IndexEnd`, adding the results from
      * `FindR` to an array. When multiple headers are included in the search, the csv is
@@ -733,7 +738,7 @@ class ParseCsv {
         if params.Breakpoint {
             ; I wrote this block to use a method that, I believe, requires the fewest top-side calculations to accomplish the task.
             ; Not sure what the interpreter does so I cannot say if it truly requires the fewest calculations.
-            start := this.Collection.Count + 1
+            start := this.Collection.Length + 1
             if (i := params.Breakpoint - this.Content.Length) > 0 {
                 Loop {
                     if _LoopContentLength(&len)
@@ -741,7 +746,7 @@ class ParseCsv {
                     if (i -= len) <= 0
                         break
                 }
-                Loop params.Breakpoint - this.Collection.Count + start
+                Loop params.Breakpoint - this.Collection.Length + start
                     this.Collection.__Add(StrSplit(this.Content.RemoveAt(1), params.FieldDelimiter))
             } else {
                 Loop params.Breakpoint
@@ -949,144 +954,48 @@ class ParseCsv {
         )
     }
 
-    class Collection {
-        Count := 0, BaseObj := {}, __Collection := Array()
+    class Collection extends Array {
         __New(Constructor, BufferLength) {
             if Constructor
                 this.DefineProp('__MakeRecord', {Call: _MakeRecord.Bind(Constructor)})
-            this.BufferLength := this.__Collection.Length := BufferLength||1000
+            this.BufferLength := this.Capacity := BufferLength||1000
             _MakeRecord(Constructor, self, arr) => Constructor(arr)
         }
 
-        __Item[index] {
-            Get {
-                i := index < 0 ? this.Count + index + 1 : index
-                if this.__Collection.Has(i)
-                    return this.__Collection[i]
-                if this.__Collection.HasOwnProp('Default')
-                    return this.__Collection.Default
-                if i > this.__Collection.Length
-                    throw IndexError('Index out of range: ' (index == i ? index : index ' | ' i), -1)
-                throw UnsetItemError('The array does not have a value at index ' (index == i ? index : index ' | ' i), -1)
-            }
-            Set {
-                i := index < 0 ? this.Count + index + 1 : index
-                if i > this.__Collection.Length
-                    this.__Collection.Length += this.BufferLength
-                this.__Collection[i] := value
-            }
-        }
         /** @description Handles adding records to the collection */
         __Add(Record) {
-            this[++this.Count] := this.__MakeRecord(Record)
-        }
-        /** @description Use this method to clear the collection array, for example, when parsing very large files. */
-        Clear() {
-            this.__Collection := [], this.Count := 0
+            if this.Length == this.Capacity
+                this.Capacity += this.BufferLength
+            this.Push(this.__MakeRecord(Record))
         }
         /** @description Handles the production of records. When `Constructor` is set, this method is overridden */
         __MakeRecord(RecordArray) {
-            ObjSetBase(Rec := {}, this.BaseObj)
-            Rec.__Item := Map()
-            for Field in RecordArray
-                Rec.Set(Rec.Headers[A_Index], Field)
+            ObjSetBase(Rec := Map(), this.BaseObj)
+            Rec.SetList(RecordArray)
             return Rec
         }
         /** @description Sets the headers and creates the base object for the record objects. */
         SetHeaders(Headers) {
-            ObjSetBase(this.BaseObj, ParseCsv.Record.Prototype)
+            ObjSetBase(this.BaseObj := Map(), ParseCsv.Record.Prototype)
             this.BaseObj.Headers := this.Headers := ParseCsv.Headers := Headers
-        }
-
-        __Enum(VarCount) {
-            i := 0
-            if VarCount == 1
-                return enum1
-            else if VarCount == 2
-                return enum2
-            else
-                throw TargetError('Unexpected number of parameters passed to the enumerator: ' VarCount, -1)
-
-            enum1(&val) {
-                if ++i > this.Count
-                    return false
-                val := this.__Collection[i]
-                return 1
-            }
-            enum2(&index, &val) {
-                if ++i > this.Count
-                    return false
-                index := i, val := this.__Collection[i]
-                return 1
-            }
-        }
-        Clone() => this.__Collection.Clone()
-        Delete(index) => this.__Collection[index < 0 ? this.Count + index + 1 : index] := unset
-        Get(index) {
-            i := index < 0 ? this.Count + index + 1 : index
-            if this.__Collection.Has(i)
-                return this.__Collection[i]
-            else if this.__Collection.HasOwnProp('Default')
-                return this.__Collection.Default
-            else if index > this.__Collection.length
-                throw IndexError('The index ' index ' is out of range.', -1)
-            else
-                throw UnsetItemError('The array does not have a value at index ' index, -1)
-        }
-        Has(index) => index && this.__Collection.Has(index < 0 ? this.Count + index + 1 : index)
-        InsertAt(index, val*) {
-            this.Count += val.Length
-            this.__Collection.InsertAt(index < 0 ? this.Count + index + 1 : index, val*)
-        }
-        Pop() => this.__Collection.RemoveAt(this.Count--)
-        Push(val*) {
-            this.__Collection.InsertAt(this.Count, val*)
-            this.Count += val.Length
-        }
-        RemoveAt(index, length?) {
-            this.Count -= length??1
-            return this.__Collection.RemoveAt(index < 0 ? this.Count + index + 1 : index, length??unset)
-        }
-        Length => this.Count
-        Capacity {
-            Get => this.__Collection.Capacity
-            Set => this.__Collection.Capacity := value
         }
     }
 
-    class Record {
-        __Enum(VarCount) => this.__Item.__Enum(VarCount)
-        Delete(key) => this.__Item.Delete(key)
-        Get(key?) {
-            if IsSet(key) {
-                if this.__Item.Has(key)
-                    return this.__Item[key]
-                else if this.__Item.HasOwnProp('Default')
-                    return this.__Item.Default
-                else
-                    throw UnsetItemError('The key ' key ' does not exist.', -1)
-            } else
-                return this.__Item
-        }
-        Set(key, val) => this.__Item.Set(key, val)
-        Has(key) => this.__Item.Has(key)
-        Clone() => this.__Item.Clone()
-        Clear() => this.__Item.Clear()
-        Capacity {
-            Get => this.__Item.Capacity
-            Set => this.__Item.Capacity := value
-        }
-        CaseSense {
-            Get => this.__Item.CaseSense
-            Set => this.__Item.CaseSense := value
+    class Record extends Map {
+        SetList(Values) {
+            if Values.Length !== this.Headers.Length
+                throw ValueError('The number of items in the Record array is not the same as the number of headers.'
+                , -1, 'Number of items: ' Values.Length)
+            for Item in Values
+                this.Set(this.Headers[A_Index], Item ?? '')
         }
         __Get(Name, *) {
-            if this.__Item.Has(Name)
-                return this.__Item[Name]
-            if this.__Item.Has(StrReplace(Name, '_', ' '))
-                return this.__Item[StrReplace(Name, '_', ' ')]
-            if this.__Item.HasOwnProp('Default')
-                return this.__Item.Default
+            if this.Has(Name)
+                return this[Name]
+            if this.Has(StrReplace(Name, '_', ' '))
+                return this[StrReplace(Name, '_', ' ')]
+            if this.HasOwnProp('Default')
+                return this.Default
             throw PropertyError('The property ' Name ' does not exist.', -1)
         }
     }
