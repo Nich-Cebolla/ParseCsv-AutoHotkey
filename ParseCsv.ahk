@@ -1,7 +1,7 @@
 /*
     Github: https://github.com/Nich-Cebolla/ParseCsv-AutoHotkey/blob/main/ParseCsv.ahk
     Author: Nich-Cebolla
-    Version: 1.0.0
+    Version: 1.0.1
     License: MIT
 */
 #Requires AutoHotkey >=2.0.17
