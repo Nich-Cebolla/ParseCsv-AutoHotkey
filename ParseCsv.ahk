@@ -13,7 +13,6 @@ class ParseCsv {
         static BreakpointAction := ''
         static CollectionArrayBuffer := 1000
         static Constructor := ''
-        static DisableLineEndingCheck := false
         static Encoding := ''
         static FieldDelimiter := ','
         static Headers := ''
@@ -35,8 +34,60 @@ class ParseCsv {
         }
     }
 
-    Fields := [], Index := 0, CharPos := 1, ContentLength := 0, Paused := 0, InputString := 0, Complete := 0
-    __Item[Index] => this.Collection[Index]
+    /**
+     * @returns {String} - Returns the pattern that will parse the CSV according to the input values.
+     */
+    static GetPattern(Quote, FieldDelimiter, RecordDelimiter, Columns) {
+        RecordDelimiter := this.__ReplaceNewlines(RecordDelimiter)
+        if RecordDelimiter
+            RD1 := RegExReplace(RecordDelimiter, '\\[rnR]|`r|`n', ''), RD2 := RD1||'[\r\n]+'
+        else
+            RD1 := '', RD2 := '[\r\n]+'
+        pattern := Format('JS)(?<=^|{1})', RecordDelimiter||'[\r\n]')
+        part := Format('(?:({1}(?:[^{1}]*+(?:{1}{1})*+)*+{1}|[^\r\n{1}{2}{3}]*+){2})', Quote, FieldDelimiter, RD1)
+        ; I decided to use a loop to dynamically construct the pattern, instead of a recursive pattern,
+        ; because it allows us to capture every field in each record all at once. This works for CSV
+        ; since we know how many fields there will be per record after getting the headers.
+        Loop Columns - 1
+            pattern .= part
+        pattern .= Format('({1}(?:[^{1}]*+(?:{1}{1})*+)*+{1}|[^\r\n{1}{2}{3}]*+)(?:{4}|$(*MARK:end))'
+        , Quote, FieldDelimiter, RD1, RD2)
+        A_Clipboard := pattern
+        try
+            RegExMatch(' ', Pattern)
+        catch Error as err {
+            if InStr(err.Message, 'Compile error 25')
+                throw Error('The procedure received "' err.Message '". To fix this, change the'
+                ' ``RecordDelimiter`` and/or ``FieldDelimiter`` to a value that is a fixed length.', -1)
+            else
+                throw err
+        }
+        return pattern
+    }
+
+    /**
+     * @description - Use this to set the CaseSense value for all new map objects. This effects
+     * record objects created by the default constructor.
+     * @param {Boolean} Value - The value to set the case sense to.
+     */
+    static SetMapCaseSense(Value := false) {
+        static OriginalMethod := Map.Prototype.__New
+        if Value {
+            Map.Prototype.DefineProp('__New', { Call: OriginalMethod })
+        } else {
+            Map.Prototype.DefineProp('__New', {Call: Map_Constructor.Bind(Value)})
+        }
+        Map_Constructor(Value, Self, Items*) {
+            Self.CaseSense := Value
+            if Items.Length
+                Self.Set(Items*)
+        }
+    }
+
+    static __ReplaceNewlines(Str, EscapeChar := '\') {
+        return StrReplace(StrReplace(Str, '`n', EscapeChar 'n'), '`r', EscapeChar 'r')
+    }
+
     /**
      * @param {Object} [params] - An object with key:val pairs containin input parameters.
      * @property {Integer} [Breakpoint] - The number of records to parse before the `BreakpointAction`
@@ -44,16 +95,8 @@ class ParseCsv {
      * instance object when the `Breakpoint` number of records have been parsed. To determine if the
      * function returned because it is finished or on a breakpoint, check `instance.Paused` which
      * will have a true value when the function returned due to a breakpoint, and a false value when
-     * returned due to completion. You can loop this with a `while` loop.
-     * @example
-        while (instance := ParseCsv()).Paused {
-            ; do work
-        }
-     * @
-     * Note the above example is only relevant when `Breakpoint` is true and `BreakpointAction` is
-     * not a function/unused. When `BreakpointAction` is a function, the process loops anyways, so
-     * looping with that example is irrelevant.
-     * @see {@link ParseCsv.Params.BreakpointAction}.
+     * returned due to completion, or `instance.Complete` which will have a false value until
+     * the content has been completely parsed.
      * @property {Func|BoundFunc|Closure} [BreakpointAction] - If set, a function to call when the
      * `Breakpoint` is reached. If unset or any other value that is not a `Func`, `ParseCsv` will
      * return when `Breakpoint` is reached. The value returned is `this` (the instance object).
@@ -61,46 +104,34 @@ class ParseCsv {
      * nonzero value.
      * @example
         MyCallback(instance) {
-        ; -1 identifies the last record parsed.
-        ; For headers that do not contain special characters, dot notation is acceptable, replacing
-        ; spaces with underscores as needed.
-            if instance.Collection[-1].Header_1 == 'Value'
-                return 1
+            loop instance.Params.Breakpoint {
+                if RegExMatch(instance.Collection[-1 * A_Index].Some_Header, SomePattern)
+                    return 1 ; I've found what I needed, so now I direct `ParseCsv` to return.
+            }
         }
      * @
      * @property {Integer} [CollectionArrayBuffer=1000] - When set, and when the current number of
      * records exceeds the length of the array, `ParseCsv` will add this number to the array's
-     * length, so the array does not need to be constantly resized when adding items. This does not
-     * impact its usage. You can still enumerate the collection using a standard `for record in
-     * collection` loop, and access the items and properties of the array using standard notation
-     * and methods. The methods account for the unused space. To clear the array use the
-     * `instance.Clear` method or the `instance.Collection.Clear` method. When unset or blank,
-     * `CollectionArrayBuffer` defaults to 1000. When `ParseCsv` completes, the array is shrunk to
-     * its actual size, and the property `instance.Collection` is reassigned the value of
-     * `instance.Collection.__Collection`, which is a standard array. Said in another way, when the
-     * procedure finishes, the collection object is a standard array and the information in this
-     * paragraph is no longer relevant. This information is relevant only when using `Breakpoint`s.
+     * capacity, so the array does not need to be constantly resized when adding items. When unset or
+     * blank, `CollectionArrayBuffer` defaults to 1000. When `ParseCsv` completes, the capacity is
+     * adjusted to the length of the array.
      * @property {Func|BoundFunc|Closure|Class} [Constructor] - A function or class constructor that
-     * will be called every time a complete record is parsed. The function will receive an array
-     * of strings, each string representing one of the fields. If you need the headers along with
-     * the strings in order for the function to handle the input, you can get the headers from
-     * `ParseCsv.Headers` (off the class object, not the instance object). The function should return
-     * the object to be added to the `instance.Collection` array. If not set or blank, the
-     * default constructor is used. The default constructor creates a `ParseCsv.Record` object.
-     * `ParseCsv.Record.Prototype` behaves like a map object. You can enumerate its contents with a
-     * `for header, field in record` loop. You can access it's items using `record[header]` notation.
-     * I also enabled the ability to use `record.header` notation if you prefer, and if the headers
-     * do not contain special characters that are invalid for properties. If you prefer property notation
-     * and the header contains spaces, you can replace the spaces with underscores in the property
-     * name. The names are still case-sensitive even when using property notation. If you would
-     * prefer that these are not case sensitive, see the documentation for a code block that sets
-     * all map objects to case-insensitive by default. All other methods available to map objects
-     * are also available to `ParseCsv.Record` objects.
-     * @property {Boolean} [DisableLineEndingCheck] - If the `RecordDelimiter` does not match the
-     * line endings within the input content, an error may occur during procesing. If this occurs,
-     * and if `DisableLineEndingCheck` is false, the `ParseCsv` will check the line endings and display
-     * the information in a message box prior to throwing the error. If `DisableLineEndingCheck` is
-     * true, the error is thrown without the additional message box.
+     * will be called every time a complete record is parsed.
+     * - The function will receive an array of strings (the field values) as the first parameter,
+     * and the instance object as the second parameter.
+     * - The headers are accessible from the instance object (`instance.headers`).
+     * - The function should return the object to be added to the `instance.Collection` array.
+     * - If the function returns 0 or an empty string, nothing is added to the collection; the data
+     * is allowed to expire when the method returns.
+     * - If not set or blank, the default constructor is used. The default constructor creates a
+     * `ParseCsv.Record` object, which is a map object with three additional properties:
+     * - `Headers` - An array of strings, the headers from the CSV
+     * - `SetList` - A method which takes the field values and sets the items in the map.
+     * - `__Get` - The default getter which is defined to allow object path notation (`record.header`)
+     * in addition to item notation `record[header]` to access items from the record object. Spaces
+     * are replaced with underscores. The names are case sensitive using both notations. If you would
+     * prefer that these are not case sensitive, call `ParseCsv.SetMapCaseSense(false)` before
+     * calling `ParseCsv()`.
      * @property {string} [Encoding] - The encoding of the file. If not set, the default encoding is used.
      * @property {string} [FieldDelimiter] - The string that separates fields. For example, a comma.
      * @property {string|Array} [Headers] - If set, the headers are used to create the `ParseCsv.Record`
@@ -127,13 +158,18 @@ class ParseCsv {
      * an error. But if the endings do not matter for `ParseCsv`'s operation, it will still
      * parse the input.
      * @property {Boolean} [Start] - If true, the procedure is called immediately upon instantiation.
-     * If false, you will receive an instance of `ParseCsv` and you can controll it at-will by calling
-     * any of its methods.
+     * If false, you will receive an instance of `ParseCsv`.
      * @param {string} [InputString] - A string to parse. If not set, the file at `PathIn` is used.
      */
     __New(params?, InputString?) {
-        params := ParseCsv.Params(params??unset)
-        this.params := params, this.Collection := ParseCsv.Collection(params.Constructor, params.CollectionArrayBuffer)
+        params := this.params := ParseCsv.Params(params??unset)
+        this.Fields := []
+        this.CharPos := 1
+        this.Index := this.ContentLength := this.Paused := this.InputString := this.Complete := 0
+        this.Collection := ParseCsv.Collection(params.CollectionArrayBuffer)
+        if Params.Constructor {
+            this.DefineProp('__MakeRecord', { Call: _MakeRecord.Bind(Params.Constructor) })
+        }
         if IsSet(InputString)
             this.Content := InputString, this.InputString := true
         if (params.RecordDelimiter && RegExMatch(params.RecordDelimiter, '[^\r\n]')) || params.QuoteChar || this.InputString {
@@ -150,7 +186,12 @@ class ParseCsv {
         }
         if params.Start
             this()
+
+        _MakeRecord(Constructor, Self, arr) {
+            return Constructor(arr, Self)
+        }
     }
+
     /**
      * @description - Returns the count for the respective input.
      * - "Records" or "R" - the count for how many records currently exist in instance.Collection
@@ -166,36 +207,9 @@ class ParseCsv {
                 throw ValueError('Unexpected input for ``Which``.', -1, 'Specifically: ' Which)
         }
     }
-    /**
-     * @returns {String} - Returns the pattern that will parse the CSV according to the input values.
-     */
-    static GetPattern(Quote, FieldDelimiter, RecordDelimiter, Columns) {
-        RecordDelimiter := StrReplace(StrReplace(RecordDelimiter, '`n', '\n'), '`r', '\r')
-        if RecordDelimiter
-            RD1 := RegExReplace(RecordDelimiter, '\\[rnR]|`r|`n', ''), RD2 := RD1||'[\r\n]+'
-        else
-            RD1 := '', RD2 := '[\r\n]+'
-        pattern := Format('JS)(?<=^|{1})', RecordDelimiter||'[\r\n]')
-        part := Format('(?:({1}(?:[^{1}]*+(?:{1}{1})*+)*+{1}|[^\r\n{1}{2}{3}]*+){2})', Quote, FieldDelimiter, RD1)
-        ; I decided to use a loop to dynamically construct the pattern, instead of a recursive pattern,
-        ; because it allows us to capture every field in each record all at once. This works for CSV
-        ; since we know how many fields there will be per record after getting the headers.
-        Loop Columns - 1
-            pattern .= part
-        pattern .= Format('({1}(?:[^{1}]*+(?:{1}{1})*+)*+{1}|[^\r\n{1}{2}{3}]*+)(?:{4}|$(*MARK:end))'
-        , Quote, FieldDelimiter, RD1, RD2)
-        A_Clipboard := pattern
-        try
-            RegExMatch(' ', Pattern)
-        catch Error as err {
-            if InStr(err.Message, 'Compile error 25')
-                throw Error('The procedure received "' err.Message '". To fix this, change the'
-                ' ``RecordDelimiter`` and/or ``FieldDelimiter`` to a value that is a fixed length.', -1)
-            else
-                throw err
-        }
-        return pattern
-    }
+
+    __Item[Index] => this.Collection[Index]
+
     /**
      * @description The general-purpose activation method. If `Start` is false, you should use this
      * method to start the parsing procedure, as it contains two instantiation methods that
@@ -205,33 +219,49 @@ class ParseCsv {
      * @returns {ParseCsv} - Returns `this` (the instance object, `ParseCsv.Prototype`).
      */
     Call() {
-        if !this.Paused
-            this.PrepareContent(), this.SetHeaders()
-        this.Paused := false, this.Parse()
+        if this.Paused {
+            this.Paused := false
+        } else {
+            this.PrepareContent()
+            this.SetHeaders()
+        }
+        this.Parse()
         if !this.Paused {
             this.End()
         }
         return this
     }
+
     /**
      * @description Clears `instance.Collection`. To be used when parsing very large files, or to
      * free memory for any general reason.
      */
     Clear() => this.Collection.Clear()
+
     /**
-     * @description - Redirects `for` loop enumeration to `instance.Collection`.
+     * @description - Can be used to ensure resources are freed.
      */
-    __Enum(VarCount) => this.Collection.__Enum(VarCount)
+    Destroy() {
+        if this.HasOwnProp('Collection') {
+            this.Collection.Clear()
+            this.DeleteProp('Collection')
+            this.DeleteProp('Params')
+            this.DeleteProp('__MakeRecord')
+            this.DeleteProp('BaseObj')
+            this.DeleteProp('Headers')
+        }
+    }
+
     /**
-     * @description Handles two end-of-procedure tasks: Closes the file if one was opened, and
-     * assigns `instance.Collection` the value of `instance.Collection.__Collection`, so the
-     * collection is a standard Array instead of a `ParseCsv.Collection` object.
+     * @description - Handles end-of-procedure actions.
      */
     End() {
         if this.HasOwnProp('File')
             this.File.Close()
+        this.Complete := 1
         this.Collection.Capacity := this.Collection.Length
     }
+
     /**
      * @description - Searches the CSV for the first field which contains the input string
      * and returns the index number of the record which contains the field.
@@ -257,12 +287,14 @@ class ParseCsv {
      * @param {VarRef} [OutField] - This variable will receive the string value of the field that
      * contains the input string.
      * @param {VarRef} [OutHeader] - This variable will receive the string value of the header name
-     * that contains the field that contains the input string.
+     * that contains `OutField`.
+     * @param {VarRef} [OutRecord] - This variable will receive the record object that contains
+     * `OutField`.
      * @returns {Integer} - The index number of the record which satisfies the conditions set by
      * the input parameters.
      */
     Find(StrToFind, Headers?, IndexStart := 1, IndexEnd?, RequireFullMatch := true
-    , CaseSensitive := false, StartingPos := 1, &OutField?, &OutHeader?) {
+    , CaseSensitive := false, StartingPos := 1, &OutField?, &OutHeader?, &OutRecord?) {
         if !IsSet(IndexEnd)
             IndexEnd := this.Count['R']
         Headers := this.__GetHeaders(Headers ?? unset)
@@ -274,8 +306,7 @@ class ParseCsv {
         while ++i <= IndexEnd {
             for Header in Headers {
                 if Process(&Header) {
-                    OutHeader := Header
-                    OutField := this[i][Header]
+                    OutField := (OutRecord := this[i])[OutHeader := Header]
                     return i
                 }
             }
@@ -284,6 +315,7 @@ class ParseCsv {
         _Process_RFM(&Header) => this[i][Header] = StrToFind
         _Process_RFM_CS(&Header) => this[i][Header] == StrToFind
     }
+
     /**
      * @description - Iterates the fields in the CSV, passing the values to a callback function.
      * When the function returns true, this function returns the index number of the record.
@@ -292,6 +324,7 @@ class ParseCsv {
      * - {String} The current field's value
      * - {Integer} The current record index number
      * - {String} The current header name
+     * - {Object} The current record object
      * @param {String|Integer|Array} [Headers] -
      * - If a string, the header name to search within.
      * - If an integer, the index value of the header to search within. If using an integer to refer
@@ -304,27 +337,29 @@ class ParseCsv {
      * @param {Integer} [IndexEnd] - The record index number to end searching at. If unset, the
      * all records after and including IndexStart are searched.
      * @param {VarRef} [OutField] - This variable will receive the string value of the field that
-     * contains the input string.
+     * was passed to the callback function when the function returns true.
      * @param {VarRef} [OutHeader] - This variable will receive the string value of the header name
-     * that contains the field that contains the input string.
+     * that contains `OutField`.
+     * @param {VarRef} [OutRecord] - This variable will receive the record object that contains
+     * `OutField`.
      * @returns {Integer} - The index number of the record that contains the field that was passed
      * to the function when the function returned true.
      */
-    FindF(Callback, Headers?, IndexStart := 1, IndexEnd?, &OutField?, &OutHeader?) {
+    FindF(Callback, Headers?, IndexStart := 1, IndexEnd?, &OutField?, &OutHeader?, &OutRecord?) {
         if !IsSet(IndexEnd)
             IndexEnd := this.Count['R']
         Headers := this.__GetHeaders(Headers ?? unset)
         i := IndexStart - 1
         while ++i <= IndexEnd {
             for Header in Headers {
-                if Callback(this[i][Header], i, Header) {
-                    OutHeader := Header
-                    OutField := this[i][Header]
+                if Callback(this[i][Header], i, Header, this[i]) {
+                    OutField := (OutRecord := this[i])[OutHeader := Header]
                     return i
                 }
             }
         }
     }
+
     /**
      * @description - Searches the CSV for a field that matches with the input pattern using
      * `RegExMatch`.
@@ -344,13 +379,14 @@ class ParseCsv {
      * to begin searching for a match. This is passed directly to `RegExMatch`.
      * @param {VarRef} [OutMatch] - This variable will receive the `RegExMatchInfo` object.
      * @param {VarRef} [OutField] - This variable will receive the string value of the field that
-     * contains the input string.
+     * matches, if any.
      * @param {VarRef} [OutHeader] - This variable will receive the string value of the header name
-     * that contains the field that contains the input string.
+     * that contains `OutField`.
+     * @param {VarRef} [OutRecord] - This variable will receive the record object that contains `OutField`.
      * @returns {Integer} - The index number of the record that contains the field that matched
      * the pattern.
      */
-    FindR(Pattern, Headers?, IndexStart := 1, IndexEnd?, StartingPos := 1, &OutMatch?, &OutField?, &OutHeader?) {
+    FindR(Pattern, Headers?, IndexStart := 1, IndexEnd?, StartingPos := 1, &OutMatch?, &OutField?, &OutHeader?, &OutRecord?) {
         if !IsSet(IndexEnd)
             IndexEnd := this.Count['R']
         Headers := this.__GetHeaders(Headers ?? unset)
@@ -358,13 +394,13 @@ class ParseCsv {
         while ++i <= IndexEnd {
             for Header in Headers {
                 if RegExMatch(this[i][Header], Pattern, &OutMatch, StartingPos) {
-                    OutHeader := Header
-                    OutField := this[i][Header]
+                    OutField := (OutRecord := this[i])[OutHeader := Header]
                     return i
                 }
             }
         }
     }
+
     /**
      * @description - Loops the CSV between `IndexStart` and `IndexEnd`, adding the results from
      * `Find` to an array. When multiple headers are included in the search, the csv is
@@ -393,35 +429,45 @@ class ParseCsv {
      * @param {Integer} [StartingPos] - This is only used when `RequireFullMatch` is false. The
      * position of the field's string (in number of characters) to search within. This is passed
      * to `InStr`.
-     * @param {Boolean} [IncludeField=true] - If true, the field value is included in the output.
-     * If false, the output only includes the index numbers.
-     * @returns {Map} - If the method returns a value at least one time, this returns a map object
+     * @param {Boolean} [IncludeFields=true] - If true, the output includes the found field values.
+     * @param {Boolean} [IncludeRecords=true] - If true, the output includes the record object associated
+     * with the found field values.
+     * @returns {Map} - If `Find` returns a value at least one time, this returns a map object
      * with the following characteristics:
-     * - The keys contained in the object are header names, unless indices are passed to `Headers`,
-     * then the keys are those values.
-     * - The values depend on the value of `IncludeField`. When `IncludeField` is true, the values
-     * are arrays of objects with properties { Field, Index }. When false, The values are arrays of
-     * integers which are returned by `Find`.
+     * - The map keys are any values passed to `Headers` which resulted in a match for at least
+     * one field. If any header did not have a field that matched the input string, that header
+     * is not represented in the result object.
+     * - The items are objects with two to four properties:
+     *   - {Integer} Index - The found index.
+     *   - {String} Header- The header name associated with the found field value.
+     *   - {String} Field - If `IncludeFields` is true, the found field value.
+     *   - {Object} Record - If `IncludeRecords` is true, the record object associated with the found
+     * field value.
      * If no values are returned by `Find`, this returns an empty string.
      */
     FindAll(StrToFind, Headers?, IndexStart := 1, IndexEnd?, RequireFullMatch := true
-    , CaseSensitive := false, StartingPos := 1, IncludeField := true) {
-        return this.__FindAll(
-            _Process.Bind(StrToFind, IndexStart, IndexEnd ?? this.Count['R']
-                , RequireFullMatch, CaseSensitive, StartingPos, IncludeField
-            )
-            , Headers ?? unset
-        )
-        _Process(StrToFind, IndexStart, IndexEnd, RequireFullMatch, CaseSensitive, StartingPos, IncludeField, &Header) {
-            local Result := [], Field
-            Add := IncludeField ? () => Result.Push({ Index: i, Field: Field }) : () => Result.Push(i)
-            i := IndexStart
-            while i <= IndexEnd {
+    , CaseSensitive := false, StartingPos := 1, IncludeFields := true, IncludeRecords := true) {
+        local Result, Field, i, Add
+        if !IsSet(IndexEnd)
+            IndexEnd := this.Count['R']
+        if IncludeFields
+            Add := IncludeRecords ? _Add4 : _Add2
+        else
+            Add := IncludeRecords ? _Add3 : _Add1
+        return this.__FindAll(_Process, Headers ?? unset)
+
+        _Add1(&Header) => result.Push({ Header: Header, Index: i })
+        _Add2(&Header) => result.Push({ Header: Header, Index: i, Field: Field })
+        _Add3(&Header) => result.Push({ Header: Header, Index: i, Record: this[i] })
+        _Add4(&Header) => result.Push({ Header: Header, Index: i, Field: Field, Record: this[i] })
+        _Process(&Header) {
+            Result := []
+            i := IndexStart - 1
+            while ++i <= IndexEnd {
                 if i := this.Find(StrToFind, Header, i, IndexEnd, RequireFullMatch, CaseSensitive, StartingPos, &Field)
-                    Add()
+                    Add(&Header)
                 else
                     break
-                i++
             }
             return Result.Length ? Result : ''
         }
@@ -453,33 +499,44 @@ class ParseCsv {
      * @param {Integer} [IndexStart=1] - The record index number to start searching from.
      * @param {Integer} [IndexEnd] - The record index number to end searching at. If unset, the
      * all records after and including IndexStart are searched.
-     * @param {Boolean} [IncludeField=true] - If true, the field value is included in the output.
-     * If false, the output only includes the index numbers.
-     * @returns {Map} - If the method returns a value at least one time, this returns a map object
+     * @param {Boolean} [IncludeFields=true] - If true, the output includes the found field values.
+     * @param {Boolean} [IncludeRecords=true] - If true, the output includes the record objects associated
+     * with the found field values.
+     * @returns {Map} - If `FindF` returns a value at least one time, this returns a map object
      * with the following characteristics:
-     * - The keys contained in the object are header names, unless indices are passed to `Headers`,
-     * then the keys are those values.
-     * - The values depend on the value of `IncludeField`. When `IncludeField` is true, the values
-     * are arrays of objects with properties { Field, Index }. When false, The values are arrays of
-     * integers which are returned by `FindF`.
+     * - The map keys are any values passed to `Headers` which resulted in a match for at least
+     * one field. If any header did not have a field cause the callback to return true, that
+     * header is not represented in the result object.
+     * - The items are objects with two to four properties:
+     *   - {Integer} Index - The found index.
+     *   - {String} Header- The header name associated with the found field value.
+     *   - {String} Field - If `IncludeFields` is true, the found field value.
+     *   - {Object} Record - If `IncludeRecords` is true, the record object associated with the found
+     * field value.
      * If no values are returned by `FindF`, this returns an empty string.
      */
-    FindAllF(Callback, Headers?, IndexStart := 1, IndexEnd?, IncludeField := true) {
-        return this.__FindAll(
-            _Process.Bind(Callback, IndexStart, IndexEnd ?? this.Count['R'], IncludeField)
-            , Headers ?? unset
-        )
-        _Process(Callback, IndexStart, IndexEnd, IncludeField, &Header) {
-            local Result := [], Field
-            i := IndexStart
-            Add := IncludeField ? () => Result.Push({ Index: i, Field: Field }) : () => Result.Push(i)
-            while i <= IndexEnd {
-                i := this.FindF(Callback, Header, i, IndexEnd, &Field)
-                if i
-                    Add()
+    FindAllF(Callback, Headers?, IndexStart := 1, IndexEnd?, IncludeFields := true, IncludeRecords := true) {
+        local Result, Field, i, Add
+        if !IsSet(IndexEnd)
+            IndexEnd := this.Count['R']
+        if IncludeFields
+            Add := IncludeRecords ? _Add4 : _Add2
+        else
+            Add := IncludeRecords ? _Add3 : _Add1
+        return this.__FindAll(_Process, Headers ?? unset)
+        
+        _Add1(&Header) => result.Push({ Header: Header, Index: i })
+        _Add2(&Header) => result.Push({ Header: Header, Index: i, Field: Field })
+        _Add3(&Header) => result.Push({ Header: Header, Index: i, Record: this[i] })
+        _Add4(&Header) => result.Push({ Header: Header, Index: i, Field: Field, Record: this[i] })
+        _Process(&Header) {
+            Result := []
+            i := IndexStart - 1
+            while ++i <= IndexEnd {
+                if i := this.FindF(Callback, Header, i, IndexEnd, &Field)
+                    Add(&Header)
                 else
                     break
-                i++
             }
             return Result.Length ? Result : ''
         }
@@ -508,66 +565,51 @@ class ParseCsv {
      * all records after and including IndexStart are searched.
      * @param {Integer} [StartingPos=1] - The position within the field (in number of characters)
      * to begin searching for a match. This is passed directly to `RegExMatch`.
-     * @param {Boolean} [IncludeMatch=true] - If true, the match object is included in the output.
-     * @param {Boolean} [IncludeField=true] - If true, the field value is included in the output.
-     * @returns {Map} - If the method returns a value at least one time, this returns a map object
+     * @param {Boolean} [IncludeMatch=true] - If true, the output includes the `RegExMatchInfo` objects.
+     * @param {Boolean} [IncludeFields=true] - If true, the output includes the found field values.
+     * @param {Boolean} [IncludeRecords=true] - If true, the output includes the record objects associated
+     * with the found field values.
+     * @returns {Map} - If `FindR` returns a value at least one time, this returns a map object
      * with the following characteristics:
-     * - The keys contained in the object are header names, unless indices are passed to `Headers`,
-     * then the keys are those values.
-     * - The values depend on the value of `IncludeMatch` and `IncludeField`. When one or both of
-     * `IncludeMatch` or `IncludeField` is true, the values are arrays of objects with the respective
-     * properties { Field, Index, Match }. When both are false, The values are arrays of integers
-     * which are returned by `FindR`.
+     * - The map keys are any values passed to `Headers` which resulted in a match for at least
+     * one field. If any header did not have a field cause the callback to return true, that
+     * header is not represented in the result object.
+     * - The items are objects with two to five properties:
+     *   - {Integer} Index - The found index.
+     *   - {String} Header- The header name associated with the found field value.
+     *   - {RegExMatchInfo} Match - If `IncludeMatch` is true, the match object.
+     *   - {String} Field - If `IncludeFields` is true, the found field value.
+     *   - {Object} Record - If `IncludeRecords` is true, the record object associated with the found
+     * field value.
      * If no values are returned by `FindR`, this returns an empty string.
      */
-    FindAllR(Pattern, Headers?, IndexStart := 1, IndexEnd?, StartingPos := 1, IncludeMatch := true, IncludeField := true) {
-        return this.__FindAll(_Process.Bind(
-                Pattern, IndexStart, IndexEnd ?? this.Count['R'], StartingPos, IncludeMatch, IncludeField
-            )
-            , Headers ?? unset
-        )
-        _Process(Pattern, IndexStart, IndexEnd, StartingPos, IncludeMatch, IncludeField, &Header) {
-            local Result := [], Match, Field
-            i := IndexStart
-            if IncludeMatch
-                Add := IncludeField ? () => Result.Push({ Index: i, Match: Match , Field: Field }) : () => Result.Push({ Index: i, Match: Match })
-            else
-                Add := IncludeField ? () => Result.Push({ Index: i, Field: Field }) : () => Result.Push(i)
-            while i <= IndexEnd {
-                i := this.FindR(Pattern, Header, i, IndexEnd, StartingPos, &Match, &Field)
-                if i
-                    Add()
-                else
+    FindAllR(Pattern, Headers?, IndexStart := 1, IndexEnd?, StartingPos := 1, IncludeMatch := true
+    , IncludeFields := true, IncludeRecords := true) {
+        local Result, Field, i, Add, Match, Record
+        if !IsSet(IndexEnd)
+            IndexEnd := this.Count['R']
+        IncludeProps := []
+        if IncludeMatch
+            IncludeProps.Push('Match')
+        if IncludeFields
+            IncludeProps.Push('Field')
+        if IncludeRecords
+            IncludeProps.Push('Record')
+        return this.__FindAll(_Process, Headers ?? unset)
+
+        _Process(&Header) {
+            Result := []
+            i := IndexStart - 1
+            while ++i <= IndexEnd {
+                if i := this.FindR(Pattern, Header, i, IndexEnd, StartingPos, &Match, &Field, , &Record) {
+                    result.Push(ResultObj := { Header: Header, Index: i })
+                    for Name in IncludeProps
+                        ResultObj.DefineProp(Name, { Value: %Name% })
+                } else
                     break
-                i++
             }
             return Result.Length ? Result : ''
         }
-    }
-
-    /** @description - Used internally when any of `FindAll`, `FindAllF`, or `FindAllR` are called. */
-    __FindAll(Callback, Headers?) {
-        if IsSet(Headers) {
-            if not Headers is Array
-                Headers := [Headers]
-        } else
-            Headers := this.Headers
-        Result := Map()
-        for Header in Headers
-            Result.Set(Header, Callback(&Header) || unset)
-        return Result.Count ? Result : ''
-    }
-    /** @description - Used internally when any of `Find`, `FindF`, `FindR`, or `Join` are called */
-    __GetHeaders(Headers?) {
-        if IsSet(Headers) {
-            if not Headers is Array
-                Headers := [Headers]
-            Result := []
-            for Header in Headers
-                Result.Push(Header is Number ? this.Headers[Header] : Header)
-            return Result
-        } else
-            return this.Headers
     }
 
     /**
@@ -643,6 +685,7 @@ class ParseCsv {
         } else
             throw ValueError('Unexpected read style: ' this.ReadStyle, -1)
     }
+
     /**
      * @description This loops the input file one line at a time. It is used when the following are true:
      * - The `RecordDelimiter` is a newline.
@@ -650,23 +693,26 @@ class ParseCsv {
      * - `PathIn` is set.
      */
     LoopReadLine() {
-        local params := this.params, BPA := params.BreakpointAction, f := this.File, Collection := this.Collection
+        local params := this.params, BPA := params.BreakpointAction, f := this.File
         if params.Breakpoint {
-            loop params.Breakpoint {
-                Collection.__Add(StrSplit(f.ReadLine(), params.FieldDelimiter))
-                if f.AtEOF
-                    break
+            loop {
+                loop params.Breakpoint {
+                    this.__Add(StrSplit(f.ReadLine(), params.FieldDelimiter))
+                    if f.AtEOF
+                        return
+                }
+                if not BPA is Func || BPA(this) {
+                    this.Paused := true
+                    return
+                }
             }
-            this.Paused := true
-            if not BPA is Func || BPA(this)
-                return
-            this.Paused := false
         } else {
             while !f.AtEOF {
-                Collection.__Add(StrSplit(f.ReadLine(), params.FieldDelimiter))
+                this.__Add(StrSplit(f.ReadLine(), params.FieldDelimiter))
             }
         }
     }
+
     /**
      * @description This loops the input value using `RegExMatch`. This is the slowest of the methods,
      * but necessary for correctly handling quoted fields. This is used when `QuoteChar` is set.
@@ -689,10 +735,10 @@ class ParseCsv {
                 } else
                     _Read()
             }
-            this.Paused := true
-            if not BPA is Func || BPA(this)
+            if not BPA is Func || BPA(this) {
+                this.Paused := true
                 return
-            this.Paused := false
+            }
         } else {
             while RegExMatch(this.content, Pattern, &match, this.CharPos) {
                 if match.mark == 'end' {
@@ -709,9 +755,8 @@ class ParseCsv {
         }
         _Process() {
             if match.Pos != this.CharPos
-                throw ValueError(Format('Invalid CSV format. `nThe current match should have began'
-                ' at position {1}, but the match occurred at position {2}.`nThe invalid matched'
-                ' content:`n{3}', this.CharPos, match.Pos, match[0]), -1)
+                this.__ThrowInvalidInputError(this.CharPos, Match.pos, 'ParseCsv.Prototype.LoopReadQuote'
+                , A_LineFile, A_ScriptFullPath)
             Fields := [], Fields.Length := this.RecordLength
             loop this.RecordLength {
                 if SubStr(match[A_Index], 1, 1) == this.params.QuoteChar && SubStr(match[A_Index], -1, 1) == this.params.QuoteChar
@@ -719,7 +764,7 @@ class ParseCsv {
                 else
                     Fields[A_Index] := match[A_Index]
             }
-            Collection.__Add(Fields)
+            this.__Add(Fields)
             this.CharPos := match.Pos + match.len
         }
         _Read() {
@@ -729,6 +774,7 @@ class ParseCsv {
             this.ReadNextQuote()
         }
     }
+
     /**
      * @description This loops the input value using `StrSplit`. This is used when `LoopReadLine` is
      * not possible, and the fields are not quoted. This is faster than `LoopReadQuote`.
@@ -747,31 +793,32 @@ class ParseCsv {
                         break
                 }
                 Loop params.Breakpoint - this.Collection.Length + start
-                    this.Collection.__Add(StrSplit(this.Content.RemoveAt(1), params.FieldDelimiter))
+                    this.__Add(StrSplit(this.Content.RemoveAt(1), params.FieldDelimiter))
             } else {
                 Loop params.Breakpoint
-                    this.Collection.__Add(StrSplit(this.Content.RemoveAt(1), params.FieldDelimiter))
+                    this.__Add(StrSplit(this.Content.RemoveAt(1), params.FieldDelimiter))
             }
-            this.Paused := true
-            if not BPA is Func || BPA(this)
+            if not BPA is Func || BPA(this) {
+                this.Paused := true
                 return
-            this.Paused := false
-        } else
+            }
+        } else {
             while !_LoopContentLength()
                 continue
+        }
 
         _LoopContentLength(&len?) {
             Loop this.Content.Length
-                this.Collection.__Add(StrSplit(this.Content[A_Index], params.FieldDelimiter))
+                this.__Add(StrSplit(this.Content[A_Index], params.FieldDelimiter))
             if !this.HasOwnProp('File') || this.File.AtEOF
                 return 1
             this.ReadNextSplit()
             len := this.Content.Length
         }
     }
+
     /** @description Redirects the function to the correct LoopRead method. */
     Parse() {
-        local params := this.params
         if this.ReadStyle == 'Quote'
             return this.LoopReadQuote()
         else if this.ReadStyle == 'Split'
@@ -781,6 +828,7 @@ class ParseCsv {
         else
             throw ValueError('Unexpected read style: ' this.ReadStyle, -1)
     }
+
     /**
      * @description An instantiation function that handles preparing the content for parsing.
      * Content is accessible from `instance.Content`. This must be called for `ParseCsv` to function,
@@ -827,9 +875,10 @@ class ParseCsv {
             }
         }
     }
+
     /** @description Reads the next segment of the content, depending on the read style. */
     ReadNext() {
-        if this.ReadSyle == 'Quote'
+        if this.ReadStyle == 'Quote'
             this.ReadNextQuote()
         else if this.ReadStyle == 'Split'
             this.ReadNextSplit()
@@ -838,6 +887,7 @@ class ParseCsv {
         else
             throw ValueError('Unexpected read style: ' this.ReadStyle, -1)
     }
+
     /**
      * @description Constructs a record from a line of text in a file. The intended use for this
      * method is in a situation where one wishes to check each individual item at a time for a
@@ -846,8 +896,9 @@ class ParseCsv {
      * function that handles this. To get the last parsed record, use `instance.Collection[-1]`.
      */
     ReadNextLine() {
-        this.Collection.__Add(StrSplit(this.File.ReadLine(), this.params.FieldDelimiter))
+        this.__Add(StrSplit(this.File.ReadLine(), this.params.FieldDelimiter))
     }
+
     /**
      * @description Reads the next segment of the content when the content contains quoted fields.
      * You shouldn't need to call this method directly, as the loop read methods will call it
@@ -858,6 +909,7 @@ class ParseCsv {
         ? this.File.Length - this.File.Pos : this.params.MaxReadSizeBytes)
         this.CharPos := 1
     }
+
     /**
      * @description Reads the next segment of the content when the content is split by a delimiter.
      * You shouldn't need to call this method directly, as the loop read methods will call it
@@ -874,6 +926,7 @@ class ParseCsv {
             this.ContentLength -= len
         }
     }
+
     /**
      * @description Handles setting the header values. This must be called for `ParseCsv` to function,
      * but is generally handled automatically by `instance.Call`.
@@ -882,23 +935,23 @@ class ParseCsv {
         local params := this.params
         if params.Headers {
             if params.Headers is Array
-                this.Collection.SetHeaders(params.Headers)
+                this.__SetHeaders(params.Headers)
             else if params.Headers is String
-                this.Collection.SetHeaders(StrSplit(params.Headers, params.FieldDelimiter))
+                this.__SetHeaders(StrSplit(params.Headers, params.FieldDelimiter))
             else
                 throw TypeError('The headers must be a string or an array.', -1)
         } else {
             if this.ReadStyle == 'Line'
-                this.Collection.SetHeaders(StrSplit(this.File.ReadLine(), params.FieldDelimiter))
+                this.__SetHeaders(StrSplit(this.File.ReadLine(), params.FieldDelimiter))
             else if this.ReadStyle == 'Quote'
                 _SetHeadersLoopReadQuote()
             else if this.ReadStyle == 'Split'
-                this.Collection.SetHeaders(StrSplit(this.Content.RemoveAt(1), params.FieldDelimiter))
+                this.__SetHeaders(StrSplit(this.Content.RemoveAt(1), params.FieldDelimiter))
             else
                 throw ValueError('Unexpected read style: ' this.ReadStyle, -1)
         }
 
-        this.RecordLength := this.Collection.Headers.Length, this.Headers := this.Collection.Headers
+        this.RecordLength := this.Headers.Length
         if this.ReadStyle == 'Quote'
             this.Pattern := ParseCsv.GetPattern(params.QuoteChar, params.FieldDelimiter, params.RecordDelimiter, this.RecordLength)
 
@@ -913,18 +966,7 @@ class ParseCsv {
             headers := [], pos := 1
             while RegExMatch(this.Content, PatternHeader, &match, pos) {
                 if match.Pos != pos {
-                    if !this.Params.DisableLineEndingCheck {
-                        MsgBox((
-                            'There is a formatting error near position ' pos '`r`n'
-                            'This may be caused by incorrect line endings.`r`n'
-                            this.__CheckLineEndings()
-                            'To disable this message (so only the error is thrown), set'
-                            ' ``DisableLineEndingCheck`` to true on the input parameters.`r`n'
-                            'The script will now exit.'
-                        ))
-                    }
-                    throw ValueError('There is a formatting error near position ' pos '. This may be'
-                    ' caused by line endings that do not match with ``RecordDelimiter``.', -1)
+                    this.__ThrowInvalidInputError(Pos, Match.Pos, A_ThisFunc, A_LineFile, A_ScriptFullPath)
                 }
                 pos := match.Pos + match.len
                 headers.Push(match['value'])
@@ -936,59 +978,161 @@ class ParseCsv {
                         ' enough to capture all of the headers.', -1)
                     } else if match.mark == 'record' {
                         this.Content := StrReplace(this.Content, h, '')
-                        this.Collection.SetHeaders(headers)
+                        this.__SetHeaders(headers)
                         break
                     }
                 }
             }
         }
     }
+
+    __Add(RecordArray) {
+        if !RecordArray.Length
+            return
+        if Record := this.__MakeRecord(RecordArray)
+            this.Collection.__Add(Record)
+    }
+
     __CheckLineEndings() {
         StrReplace(this.Content, '`r', , , &CRCount)
         StrReplace(this.Content, '`n', , , &LFCount)
-        return (
-            '``RecordDelimiter`` = "' StrReplace(StrReplace(this.Params.RecordDelimiter, '`r', '``r')
-            , '`n', '``n') '".`r`n'
-            'CR Count = ' CRCount '.`r`n'
-            'LF Count = ' LFCount '.`r`n'
-        )
+        Values := { CRCount: CRCount, LFCout: LFCount, Result: 0 }
+        switch Values.RecordDelimiter {
+            case '`n':
+                if CRCount {
+                    _SetErrorStr()
+                }
+            case '`r':
+                if LFCount {
+                    _SetErrorStr()
+                }
+            case '`r`n':
+                if CRCount !== LFCount || !CRCount {
+                    _SetErrorStr()
+                }
+            default:
+                Values.Result := 2
+                Values.ErrorStr := ('``ParseCsv`` failed to parse the content. This is likely caused by'
+                ' the ``RecordDelimiter`` or ``FieldDelimiter`` being set incorrectly.`nIt may'
+                ' also be caused by a delimiter being used literally outside of a quoted field.')
+        }
+        return Values
+
+        _SetErrorStr() {
+            Values.Result := 1
+            Values.ErrorStr := ('``ParseCsv`` failed to parse the content. The record delimiter is "'
+            ParseCsv.__ReplaceNewlines(this.Params.RecordDelimiter, '``') '" but the  content  contains '
+            CRCount ' carriage return characters and ' LFCount ' line feed characters.')
+        }
+    }
+
+    /**
+     * @description - Redirects `for` loop enumeration to `instance.Collection`.
+     */
+    __Enum(VarCount) => this.Collection.__Enum(VarCount)
+
+    /**
+     * @description - Used internally when any of `FindAll`, `FindAllF`, or `FindAllR` are called.
+     */
+    __FindAll(Callback, Headers?) {
+        if IsSet(Headers) {
+            if not Headers is Array
+                Headers := [Headers]
+        } else
+            Headers := this.Headers
+        Result := Map()
+        for Header in Headers
+            Result.Set(Header, Callback(&Header) || unset)
+        return Result.Count ? Result : ''
+    }
+
+    /**
+     * @description - Used internally when any of `Find`, `FindF`, `FindR`, or `Join` are called
+     */
+    __GetHeaders(Headers?) {
+        if IsSet(Headers) {
+            if not Headers is Array
+                Headers := [Headers]
+            Result := []
+            for Header in Headers
+                Result.Push(Header is Number ? this.Headers[Header] : Header)
+            return Result
+        } else
+            return this.Headers
+    }
+
+    /**
+     * @description Handles the production of records. When `Constructor` is set, this method is overridden
+     */
+    __MakeRecord(RecordArray) {
+        ObjSetBase(Rec := Map(), this.BaseObj)
+        Rec.SetList(RecordArray)
+        return Rec
+    }
+
+    /**
+     * @description Sets the headers and creates the base object for the record objects.
+     */
+    __SetHeaders(Headers) {
+        ObjSetBase(this.BaseObj := Map(), ParseCsv.Record.Prototype)
+        this.BaseObj.Headers := this.Headers := Headers
+    }
+
+    __ThrowInvalidInputError(CorrectPos, ActualPos, Fn, LineFile, PathFile) {
+        Values := this.__CheckLineEndings()
+        ; Use the output to diagnose the cause of the error.
+        OutputDebug('`nCRCount: ' Values.CRCount '`tLFCount: ' Values.LFCount '`tRecordDelimiter: '
+        ParseCsv.__ReplaceNewlines(this.Params.RecordDelimiter)
+        '`nCheckLineEndings result: ' Values.Result '`tCorrect pos: ' CorrectPos '`tActual pos: ' ActualPos
+        '`nContent excerpt (Position ' CorrectPos - 100 ' to ' CorrectPos + 100 ')`n'
+        SubStr(this.Content, CorrectPos - 100, 200))
+        err := ValueError(Values.ErrorStr)
+        err.What := Fn
+        err.Line := LineFile
+        err.File := PathFile
+        throw err
     }
 
     class Collection extends Array {
-        __New(Constructor, BufferLength) {
-            if Constructor
-                this.DefineProp('__MakeRecord', {Call: _MakeRecord.Bind(Constructor)})
+        /**
+         * @description - This is the constructor to the `instance.Collection` array. This is
+         * called internally.
+         * @param {Integer} BufferLength - The input `params.BufferLength` value.
+         */
+        __New(BufferLength) {
             this.BufferLength := this.Capacity := BufferLength||1000
-            _MakeRecord(Constructor, self, arr) => Constructor(arr)
         }
 
-        /** @description Handles adding records to the collection */
+        /**
+         * @description Handles adding records to the collection
+         */
         __Add(Record) {
             if this.Length == this.Capacity
                 this.Capacity += this.BufferLength
-            this.Push(this.__MakeRecord(Record))
-        }
-        /** @description Handles the production of records. When `Constructor` is set, this method is overridden */
-        __MakeRecord(RecordArray) {
-            ObjSetBase(Rec := Map(), this.BaseObj)
-            Rec.SetList(RecordArray)
-            return Rec
-        }
-        /** @description Sets the headers and creates the base object for the record objects. */
-        SetHeaders(Headers) {
-            ObjSetBase(this.BaseObj := Map(), ParseCsv.Record.Prototype)
-            this.BaseObj.Headers := this.Headers := ParseCsv.Headers := Headers
+            this.Push(Record)
         }
     }
 
     class Record extends Map {
+
+        /**
+         * @description - Sets the values of the record fields.
+         * @param {Array} Values - An array of values to set.
+         */
         SetList(Values) {
-            if Values.Length !== this.Headers.Length
+            Headers := this.Headers
+            if Values.Length !== Headers.Length
                 throw ValueError('The number of items in the Record array is not the same as the number of headers.'
                 , -1, 'Number of items: ' Values.Length)
             for Item in Values
-                this.Set(this.Headers[A_Index], Item ?? '')
+                this.Set(Headers[A_Index], Item ?? '')
         }
+
+        /**
+         * @description - Enables `object.path` notation to access field values.
+         * E.g. `Record.HeaderName`. If the header name contains spaces, underscores can be used
+         * instead. E.g. `Record.Header_Name`.
+         */
         __Get(Name, *) {
             if this.Has(Name)
                 return this[Name]
