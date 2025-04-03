@@ -1,3 +1,6 @@
+2025-04-03
+- Fixed bug: The function that is passed to the `Constructor` parameter was intended to receive the `ParseCsv` instance object as the second parameter, but it was not.
+
 2025-03-08
 Changes to ParseCsv.Collection.Prototype:
 - Removed `__Add`, `__MakeRecord`, and `SetHeaders`, and removed associated code from `__New`.
