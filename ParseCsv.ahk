@@ -1007,7 +1007,7 @@ class ParseCsv {
     __Add(RecordArray) {
         if !RecordArray.Length
             return
-        if Record := this.__MakeRecord(RecordArray, this)
+        if Record := this.__MakeRecord(RecordArray)
             this.Collection.__Add(Record)
     }
 
