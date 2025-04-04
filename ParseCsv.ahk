@@ -1,7 +1,7 @@
 /*
     Github: https://github.com/Nich-Cebolla/ParseCsv-AutoHotkey/blob/main/ParseCsv.ahk
     Author: Nich-Cebolla
-    Version: 1.0.1
+    Version: 1.0.2
     License: MIT
 */
 #Requires AutoHotkey >=2.0.17
@@ -22,10 +22,10 @@ class ParseCsv {
         static RecordDelimiter := ''
         static Start := true
 
-        __New(params?) {
+        __New(Params?) {
             for Name, Val in ParseCsv.Params.OwnProps() {
-                if IsSet(params) && params.HasOwnProp(Name)
-                   this.DefineProp(Name, {Value: params.%Name%})
+                if IsSet(Params) && Params.HasOwnProp(Name)
+                   this.DefineProp(Name, {Value: Params.%Name%})
                 else if IsSet(ParseCsvConfig) && ParseCsvConfig.HasOwnProp(Name)
                    this.DefineProp(Name, {Value: ParseCsvConfig.%Name%})
                 else
@@ -52,7 +52,6 @@ class ParseCsv {
             pattern .= part
         pattern .= Format('({1}(?:[^{1}]*+(?:{1}{1})*+)*+{1}|[^\r\n{1}{2}{3}]*+)(?:{4}|$(*MARK:end))'
         , Quote, FieldDelimiter, RD1, RD2)
-        A_Clipboard := pattern
         try
             RegExMatch(' ', Pattern)
         catch Error as err {
@@ -84,12 +83,18 @@ class ParseCsv {
         }
     }
 
+    /**
+     * @description - Used to replace line feed and carriage returns with their escaped counterpart strings.
+     * @param {String} Str - The string to process.
+     * @param {String} [EscapeChar='\'] - The escape character to use.
+     * @returns {String} - The escaped LF/CR/both.
+     */
     static __ReplaceNewlines(Str, EscapeChar := '\') {
         return StrReplace(StrReplace(Str, '`n', EscapeChar 'n'), '`r', EscapeChar 'r')
     }
 
     /**
-     * @param {Object} [params] - An object with key:val pairs containin input parameters.
+     * @param {Object} [Params] - An object with key:val pairs containin input parameters.
      * @property {Integer} [Breakpoint] - The number of records to parse before the `BreakpointAction`
      * is invoked. When using `Breakpoint` but not using `BreakpointAction`, `ParseCsv` returns the
      * instance object when the `Breakpoint` number of records have been parsed. To determine if the
@@ -161,20 +166,20 @@ class ParseCsv {
      * If false, you will receive an instance of `ParseCsv`.
      * @param {string} [InputString] - A string to parse. If not set, the file at `PathIn` is used.
      */
-    __New(params?, InputString?) {
-        params := this.params := ParseCsv.Params(params??unset)
+    __New(Params?, InputString?) {
+        Params := this.Params := ParseCsv.Params(Params??unset)
         this.Fields := []
         this.CharPos := 1
         this.Index := this.ContentLength := this.Paused := this.InputString := this.Complete := 0
-        this.Collection := ParseCsv.Collection(params.CollectionArrayBuffer)
+        this.Collection := ParseCsv.Collection(Params.CollectionArrayBuffer)
         if Params.Constructor {
             this.DefineProp('__MakeRecord', { Call: _MakeRecord.Bind(Params.Constructor) })
         }
         if IsSet(InputString)
             this.Content := InputString, this.InputString := true
-        if (params.RecordDelimiter && RegExMatch(params.RecordDelimiter, '[^\r\n]')) || params.QuoteChar || this.InputString {
+        if (Params.RecordDelimiter && RegExMatch(Params.RecordDelimiter, '[^\r\n]')) || Params.QuoteChar || this.InputString {
             ; When there are quoted fields, the most straightforward parsing method is to loop with RegExMatch.
-            if params.QuoteChar {
+            if Params.QuoteChar {
                 this.ReadStyle := 'Quote'
             } else {
                 ; When there are no quoted fields but the `RecordDelimiter` is not a newline, we can use `StrSplit`, either on the whole file or looping the content.
@@ -184,7 +189,7 @@ class ParseCsv {
             ; When there are no quoted fields and the `RecordDelimiter` is a newline, we can loop by line, which is both fast and uses minimal memory.
             this.ReadStyle := 'Line'
         }
-        if params.Start
+        if Params.Start
             this()
 
         _MakeRecord(Constructor, Self, arr) {
@@ -204,10 +209,17 @@ class ParseCsv {
             else if W = 'H'
                 return this.Headers.Length
             else
-                throw ValueError('Unexpected input for ``Which``.', -1, 'Specifically: ' Which)
+                throw ValueError('Unexpected input for ``Which``.', -1, Which)
         }
     }
 
+    /**
+     * @description - Redirects item access to the collection object. Records are accessible from
+     * the instance object, e.g. `instance[2]` or to access a field value `instance[2]['Some Header']`
+     * or using object path notation `instance[2].Some_Header`.
+     * @param {Integer} Index - The index of the record to access.
+     * @returns {Object} - The record object.
+     */
     __Item[Index] => this.Collection[Index]
 
     /**
@@ -524,7 +536,7 @@ class ParseCsv {
         else
             Add := IncludeRecords ? _Add3 : _Add1
         return this.__FindAll(_Process, Headers ?? unset)
-        
+
         _Add1(&Header) => result.Push({ Header: Header, Index: i })
         _Add2(&Header) => result.Push({ Header: Header, Index: i, Field: Field })
         _Add3(&Header) => result.Push({ Header: Header, Index: i, Record: this[i] })
@@ -665,13 +677,15 @@ class ParseCsv {
         _AddWithQuote(&Header) => (A_Index == 1 ? '' : Delimiter) quote StrReplace(this[i][header], quote, quote quote) quote
     }
 
-    /** @returns {Float} - Returns the progress of the parsing procedure as a float between 0 and 1. */
+    /**
+     * @returns {Float} - Returns the progress of the parsing procedure as a float between 0 and 1.
+     */
     GetProgress() {
         if this.ReadStyle == 'Line'
             return this.File.Pos / this.File.Length
         else if this.ReadStyle == 'Quote' {
             if this.HasOwnProp('File')
-                return (this.File.Pos - StrPut(SubStr(this.Content, this.CharPos + 1), this.params.Encoding||'UTF-8')) / this.File.Length
+                return (this.File.Pos - StrPut(SubStr(this.Content, this.CharPos + 1), this.Params.Encoding||'UTF-8')) / this.File.Length
             else
                 return this.CharPos / this.ContentLength
         } else if this.ReadStyle == 'Split' {
@@ -679,7 +693,7 @@ class ParseCsv {
                 len := 0
                 Loop this.Content.Length
                     len += StrLen(this.Content[A_Index])
-                return (this.File.Pos - StrPut(len, this.params.Encoding||'UTF-8')) / this.File.Length
+                return (this.File.Pos - StrPut(len, this.Params.Encoding||'UTF-8')) / this.File.Length
             } else
                 return this.Content.Length / this.ContentLength
         } else
@@ -693,11 +707,11 @@ class ParseCsv {
      * - `PathIn` is set.
      */
     LoopReadLine() {
-        local params := this.params, BPA := params.BreakpointAction, f := this.File
-        if params.Breakpoint {
+        local Params := this.Params, BPA := Params.BreakpointAction, f := this.File
+        if Params.Breakpoint {
             loop {
-                loop params.Breakpoint {
-                    this.__Add(StrSplit(f.ReadLine(), params.FieldDelimiter))
+                loop Params.Breakpoint {
+                    this.__Add(StrSplit(f.ReadLine(), Params.FieldDelimiter))
                     if f.AtEOF
                         return
                 }
@@ -708,7 +722,7 @@ class ParseCsv {
             }
         } else {
             while !f.AtEOF {
-                this.__Add(StrSplit(f.ReadLine(), params.FieldDelimiter))
+                this.__Add(StrSplit(f.ReadLine(), Params.FieldDelimiter))
             }
         }
     }
@@ -718,10 +732,10 @@ class ParseCsv {
      * but necessary for correctly handling quoted fields. This is used when `QuoteChar` is set.
      */
     LoopReadQuote() {
-        local params := this.params, Pattern := this.Pattern, BPA := params.BreakpointAction, Collection := this.Collection
+        local Params := this.Params, Pattern := this.Pattern, BPA := Params.BreakpointAction, Collection := this.Collection
         , LastMatch
-        if params.Breakpoint {
-            Loop params.Breakpoint {
+        if Params.Breakpoint {
+            Loop Params.Breakpoint {
                 if RegExMatch(this.content, Pattern, &match, this.CharPos) {
                     if match.mark == 'end' {
                         if this.HasOwnProp('File') && this.File.AtEOF {
@@ -759,7 +773,7 @@ class ParseCsv {
                 , A_LineFile, A_ScriptFullPath)
             Fields := [], Fields.Length := this.RecordLength
             loop this.RecordLength {
-                if SubStr(match[A_Index], 1, 1) == this.params.QuoteChar && SubStr(match[A_Index], -1, 1) == this.params.QuoteChar
+                if SubStr(match[A_Index], 1, 1) == this.Params.QuoteChar && SubStr(match[A_Index], -1, 1) == this.Params.QuoteChar
                     Fields[A_Index] :=  SubStr(match[A_Index], 2, match.Len[A_Index] - 2)
                 else
                     Fields[A_Index] := match[A_Index]
@@ -770,7 +784,7 @@ class ParseCsv {
         _Read() {
             if !this.HasOwnProp('File')
                 return
-            this.File.Pos -= StrPut(SubStr(this.Content, LastMatch.pos + LastMatch.len + 1), params.Encoding||'UTF-8')
+            this.File.Pos -= StrPut(SubStr(this.Content, LastMatch.pos + LastMatch.len + 1), Params.Encoding||'UTF-8')
             this.ReadNextQuote()
         }
     }
@@ -780,23 +794,23 @@ class ParseCsv {
      * not possible, and the fields are not quoted. This is faster than `LoopReadQuote`.
      */
     LoopReadSplit() {
-        local params := this.params, BPA := params.BreakpointAction, Collection := this.Collection
-        if params.Breakpoint {
+        local Params := this.Params, BPA := Params.BreakpointAction, Collection := this.Collection
+        if Params.Breakpoint {
             ; I wrote this block to use a method that, I believe, requires the fewest top-side calculations to accomplish the task.
             ; Not sure what the interpreter does so I cannot say if it truly requires the fewest calculations.
             start := this.Collection.Length + 1
-            if (i := params.Breakpoint - this.Content.Length) > 0 {
+            if (i := Params.Breakpoint - this.Content.Length) > 0 {
                 Loop {
                     if _LoopContentLength(&len)
                         return
                     if (i -= len) <= 0
                         break
                 }
-                Loop params.Breakpoint - this.Collection.Length + start
-                    this.__Add(StrSplit(this.Content.RemoveAt(1), params.FieldDelimiter))
+                Loop Params.Breakpoint - this.Collection.Length + start
+                    this.__Add(StrSplit(this.Content.RemoveAt(1), Params.FieldDelimiter))
             } else {
-                Loop params.Breakpoint
-                    this.__Add(StrSplit(this.Content.RemoveAt(1), params.FieldDelimiter))
+                Loop Params.Breakpoint
+                    this.__Add(StrSplit(this.Content.RemoveAt(1), Params.FieldDelimiter))
             }
             if not BPA is Func || BPA(this) {
                 this.Paused := true
@@ -809,7 +823,7 @@ class ParseCsv {
 
         _LoopContentLength(&len?) {
             Loop this.Content.Length
-                this.__Add(StrSplit(this.Content[A_Index], params.FieldDelimiter))
+                this.__Add(StrSplit(this.Content[A_Index], Params.FieldDelimiter))
             if !this.HasOwnProp('File') || this.File.AtEOF
                 return 1
             this.ReadNextSplit()
@@ -817,7 +831,9 @@ class ParseCsv {
         }
     }
 
-    /** @description Redirects the function to the correct LoopRead method. */
+    /**
+     * @description Redirects the function to the correct LoopRead method.
+     */
     Parse() {
         if this.ReadStyle == 'Quote'
             return this.LoopReadQuote()
@@ -835,43 +851,43 @@ class ParseCsv {
      * but is generally handled automatically by `instance.Call`.
      */
     PrepareContent() {
-        local params := this.params
+        local Params := this.Params
         if this.InputString {
             _GetLineEndings()
             if this.ReadStyle == 'Split'
-                this.Content := StrSplit(this.Content, params.RecordDelimiter)
+                this.Content := StrSplit(this.Content, Params.RecordDelimiter)
             else
                 this.ContentLength := StrLen(this.Content)
             return
         }
-        if this.ReadStyle == 'Line' || params.MaxReadSizeBytes {
-            this.File := FileOpen(params.PathIn, 'r', params.Encoding||unset)
+        if this.ReadStyle == 'Line' || Params.MaxReadSizeBytes {
+            this.File := FileOpen(Params.PathIn, 'r', Params.Encoding||unset)
             this.File.Read(1), this.File.Pos := 0
             if this.ReadStyle == 'Line'
                 return
-            this.Content := this.File.Read(params.MaxReadSizeBytes)
+            this.Content := this.File.Read(Params.MaxReadSizeBytes)
         } else
-            this.Content := FileRead(params.PathIn, params.Encoding||unset)
+            this.Content := FileRead(Params.PathIn, Params.Encoding||unset)
         _GetLineEndings()
         if this.ReadStyle == 'Split' {
-            this.Content := StrSplit(this.Content, params.RecordDelimiter)
-            if params.MaxReadSizeBytes {
+            this.Content := StrSplit(this.Content, Params.RecordDelimiter)
+            if Params.MaxReadSizeBytes {
                 if !this.File.AtEOF
-                    this.File.Pos -= StrPut(this.Content.Pop(), params.Encoding||'UTF-8')
+                    this.File.Pos -= StrPut(this.Content.Pop(), Params.Encoding||'UTF-8')
             } else
                 this.ContentLength := this.Content.Length
-        } else if !params.MaxReadSizeBytes
+        } else if !Params.MaxReadSizeBytes
             this.ContentLength := StrLen(this.Content)
         _GetLineEndings() {
-            if !params.RecordDelimiter {
+            if !Params.RecordDelimiter {
                 StrReplace(this.Content, '`r`n', , , &CRLFCount)
                 StrReplace(this.Content, '`n', , , &LFCount), StrReplace(this.Content, '`r', , , &CRCount)
                 if CRLFCount && CRCount == LFCount
-                    params.RecordDelimiter := '`r`n'
+                    Params.RecordDelimiter := '`r`n'
                 else if CRCount > LFCount
-                    params.RecordDelimiter := '`r'
+                    Params.RecordDelimiter := '`r'
                 else
-                    params.RecordDelimiter := '`n'
+                    Params.RecordDelimiter := '`n'
             }
         }
     }
@@ -896,7 +912,7 @@ class ParseCsv {
      * function that handles this. To get the last parsed record, use `instance.Collection[-1]`.
      */
     ReadNextLine() {
-        this.__Add(StrSplit(this.File.ReadLine(), this.params.FieldDelimiter))
+        this.__Add(StrSplit(this.File.ReadLine(), this.Params.FieldDelimiter))
     }
 
     /**
@@ -905,8 +921,8 @@ class ParseCsv {
      * automatically.
      */
     ReadNextQuote() {
-        this.Content := this.File.Read(this.File.Pos + this.params.MaxReadSizeBytes > this.File.Length
-        ? this.File.Length - this.File.Pos : this.params.MaxReadSizeBytes)
+        this.Content := this.File.Read(this.File.Pos + this.Params.MaxReadSizeBytes > this.File.Length
+        ? this.File.Length - this.File.Pos : this.Params.MaxReadSizeBytes)
         this.CharPos := 1
     }
 
@@ -916,13 +932,13 @@ class ParseCsv {
      * automatically.
      */
     ReadNextSplit() {
-        this.Content := this.File.Read(this.File.Pos + this.params.MaxReadSizeBytes > this.File.Length
-        ? this.File.Length - this.File.Pos : this.params.MaxReadSizeBytes)
+        this.Content := this.File.Read(this.File.Pos + this.Params.MaxReadSizeBytes > this.File.Length
+        ? this.File.Length - this.File.Pos : this.Params.MaxReadSizeBytes)
         this.ContentLength := StrLen(this.Content)
-        this.Content := StrSplit(this.Content, this.params.RecordDelimiter||this.__GetLineEndings(true))
+        this.Content := StrSplit(this.Content, this.Params.RecordDelimiter||this.__GetLineEndings(true))
         ; The last item in the array is probably not a complete record, so it is removed.
         if !this.File.AtEOF {
-            this.File.Pos -= StrPut((len:=StrLen(this.Content.Pop())), this.params.Encoding||'UTF-8')
+            this.File.Pos -= StrPut((len:=StrLen(this.Content.Pop())), this.Params.Encoding||'UTF-8')
             this.ContentLength -= len
         }
     }
@@ -932,37 +948,35 @@ class ParseCsv {
      * but is generally handled automatically by `instance.Call`.
     */
     SetHeaders() {
-        local params := this.params
-        if params.Headers {
-            if params.Headers is Array
-                this.__SetHeaders(params.Headers)
-            else if params.Headers is String
-                this.__SetHeaders(StrSplit(params.Headers, params.FieldDelimiter))
+        local Params := this.Params
+        if Params.Headers {
+            if Params.Headers is Array
+                this.__SetHeaders(Params.Headers)
+            else if Params.Headers is String
+                this.__SetHeaders(StrSplit(Params.Headers, Params.FieldDelimiter))
             else
                 throw TypeError('The headers must be a string or an array.', -1)
         } else {
             if this.ReadStyle == 'Line'
-                this.__SetHeaders(StrSplit(this.File.ReadLine(), params.FieldDelimiter))
+                this.__SetHeaders(StrSplit(this.File.ReadLine(), Params.FieldDelimiter))
             else if this.ReadStyle == 'Quote'
                 _SetHeadersLoopReadQuote()
             else if this.ReadStyle == 'Split'
-                this.__SetHeaders(StrSplit(this.Content.RemoveAt(1), params.FieldDelimiter))
+                this.__SetHeaders(StrSplit(this.Content.RemoveAt(1), Params.FieldDelimiter))
             else
                 throw ValueError('Unexpected read style: ' this.ReadStyle, -1)
         }
 
         this.RecordLength := this.Headers.Length
         if this.ReadStyle == 'Quote'
-            this.Pattern := ParseCsv.GetPattern(params.QuoteChar, params.FieldDelimiter, params.RecordDelimiter, this.RecordLength)
+            this.Pattern := ParseCsv.GetPattern(Params.QuoteChar, Params.FieldDelimiter, Params.RecordDelimiter, this.RecordLength)
 
         _SetHeadersLoopReadQuote() {
             PatternHeader := Format('JS)(?:{1}(?<value>(?:[^{1}]*+(?:{1}{1})*+)*+){1}|'
             '(?<value>[^\r\n{1}{2}{3}]*+))(?:{2}|{4}(*MARK:record)|$(*MARK:end))|(?:{2}$(*MARK:end))'
-            , params.QuoteChar, params.FieldDelimiter
-            , params.RecordDelimiter ? RegExReplace(params.RecordDelimiter, '\\[rnR]|`r|`n', '') : ''
-            , params.RecordDelimiter ? StrReplace(StrReplace(params.RecordDelimiter, '`n', '\n'), '`r', '\r') : '[\r\n]+')
-            A_Clipboard := PatternHeader
-            sleep 1
+            , Params.QuoteChar, Params.FieldDelimiter
+            , Params.RecordDelimiter ? RegExReplace(Params.RecordDelimiter, '\\[rnR]|`r|`n', '') : ''
+            , Params.RecordDelimiter ? StrReplace(StrReplace(Params.RecordDelimiter, '`n', '\n'), '`r', '\r') : '[\r\n]+')
             headers := [], pos := 1
             while RegExMatch(this.Content, PatternHeader, &match, pos) {
                 if match.Pos != pos {
@@ -986,13 +1000,20 @@ class ParseCsv {
         }
     }
 
+    /**
+     * @description - Handles passing the field values to the record constructor, and adding the
+     * record to the array. If the constructor returns 0 or an empty string, the record is skipped.
+     */
     __Add(RecordArray) {
         if !RecordArray.Length
             return
-        if Record := this.__MakeRecord(RecordArray)
+        if Record := this.__MakeRecord(RecordArray, this)
             this.Collection.__Add(Record)
     }
 
+    /**
+     * @description - A helper function to compare the line endings to the record delimiter.
+     */
     __CheckLineEndings() {
         StrReplace(this.Content, '`r', , , &CRCount)
         StrReplace(this.Content, '`n', , , &LFCount)
@@ -1064,7 +1085,7 @@ class ParseCsv {
     /**
      * @description Handles the production of records. When `Constructor` is set, this method is overridden
      */
-    __MakeRecord(RecordArray) {
+    __MakeRecord(RecordArray, *) {
         ObjSetBase(Rec := Map(), this.BaseObj)
         Rec.SetList(RecordArray)
         return Rec
@@ -1078,6 +1099,18 @@ class ParseCsv {
         this.BaseObj.Headers := this.Headers := Headers
     }
 
+    /**
+     * @description - This provides information and context when a RegExMatch matches at an invalid
+     * position. Wherever RegExMatch is used to parse the input content, the function checks the
+     * position of the match to validate it. If the match is invalid, this method is called. It
+     * will check the line endings and compare them to the record delimiter, then throw an error
+     * with the details. Additional context is passed to `OutputDebug`.
+     * @param {Integer} CorrectPos - The correct position of the match.
+     * @param {Integer} ActualPos - The actual position of the match.
+     * @param {String} Fn - The function name where the error occurred.
+     * @param {String} LineFile - The line number where the error occurred.
+     * @param {String} PathFile - The path to the file where the error occurred.
+     */
     __ThrowInvalidInputError(CorrectPos, ActualPos, Fn, LineFile, PathFile) {
         Values := this.__CheckLineEndings()
         ; Use the output to diagnose the cause of the error.
@@ -1093,11 +1126,17 @@ class ParseCsv {
         throw err
     }
 
+    /**
+     * @class
+     * @description - The `ParseCsv.Collection` class is an array object that is used to store the
+     * record objects. Its methods are called internally by `ParseCsv`. It is accessible from
+     * `instance.Collection`.
+     */
     class Collection extends Array {
         /**
          * @description - This is the constructor to the `instance.Collection` array. This is
          * called internally.
-         * @param {Integer} BufferLength - The input `params.BufferLength` value.
+         * @param {Integer} BufferLength - The input `Params.BufferLength` value.
          */
         __New(BufferLength) {
             this.BufferLength := this.Capacity := BufferLength||1000
@@ -1113,17 +1152,25 @@ class ParseCsv {
         }
     }
 
+    /**
+     * @class
+     * @description - `ParseCsv.Record` is the default record object when an input constructor
+     * is not used. It is a map object with three additions:
+     * - `Headers` - An array of the header names. This is on the base object; it's not an own property.
+     * - `SetList` - A method to set the values of the record object.
+     * - `__Get` - A method to enable `object.path` notation to access field values.
+     */
     class Record extends Map {
 
         /**
-         * @description - Sets the values of the record fields.
+         * @description - Sets the values of the record object.
          * @param {Array} Values - An array of values to set.
          */
         SetList(Values) {
             Headers := this.Headers
             if Values.Length !== Headers.Length
-                throw ValueError('The number of items in the Record array is not the same as the number of headers.'
-                , -1, 'Number of items: ' Values.Length)
+                throw ValueError('The number of items in the Record array is not the same as the'
+                ' number of headers.', -1, 'Number of items: ' Values.Length)
             for Item in Values
                 this.Set(Headers[A_Index], Item ?? '')
         }
