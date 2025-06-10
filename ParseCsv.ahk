@@ -1,7 +1,7 @@
 /*
     Github: https://github.com/Nich-Cebolla/ParseCsv-AutoHotkey/blob/main/ParseCsv.ahk
     Author: Nich-Cebolla
-    Version: 1.0.2
+    Version: 1.0.3
     License: MIT
 */
 #Requires AutoHotkey >=2.0.17
@@ -32,36 +32,6 @@ class ParseCsv {
                    this.DefineProp(Name, {Value: Val})
             }
         }
-    }
-
-    /**
-     * @returns {String} - Returns the pattern that will parse the CSV according to the input values.
-     */
-    static GetPattern(Quote, FieldDelimiter, RecordDelimiter, Columns) {
-        RecordDelimiter := this.__ReplaceNewlines(RecordDelimiter)
-        if RecordDelimiter
-            RD1 := RegExReplace(RecordDelimiter, '\\[rnR]|`r|`n', ''), RD2 := RD1||'[\r\n]+'
-        else
-            RD1 := '', RD2 := '[\r\n]+'
-        pattern := Format('JS)(?<=^|{1})', RecordDelimiter||'[\r\n]')
-        part := Format('(?:({1}(?:[^{1}]*+(?:{1}{1})*+)*+{1}|[^\r\n{1}{2}{3}]*+){2})', Quote, FieldDelimiter, RD1)
-        ; I decided to use a loop to dynamically construct the pattern, instead of a recursive pattern,
-        ; because it allows us to capture every field in each record all at once. This works for CSV
-        ; since we know how many fields there will be per record after getting the headers.
-        Loop Columns - 1
-            pattern .= part
-        pattern .= Format('({1}(?:[^{1}]*+(?:{1}{1})*+)*+{1}|[^\r\n{1}{2}{3}]*+)(?:{4}|$(*MARK:end))'
-        , Quote, FieldDelimiter, RD1, RD2)
-        try
-            RegExMatch(' ', Pattern)
-        catch Error as err {
-            if InStr(err.Message, 'Compile error 25')
-                throw Error('The procedure received "' err.Message '". To fix this, change the'
-                ' ``RecordDelimiter`` and/or ``FieldDelimiter`` to a value that is a fixed length.', -1)
-            else
-                throw err
-        }
-        return pattern
     }
 
     /**
@@ -108,12 +78,12 @@ class ParseCsv {
      * If using a `BreakpointAction` callback, you can direct `ParseCsv` to return by returning a
      * nonzero value.
      * @example
-        MyCallback(instance) {
-            loop instance.Params.Breakpoint {
-                if RegExMatch(instance.Collection[-1 * A_Index].Some_Header, SomePattern)
-                    return 1 ; I've found what I needed, so now I direct `ParseCsv` to return.
-            }
-        }
+     *  MyCallback(instance) {
+     *      loop instance.Params.Breakpoint {
+     *          if RegExMatch(instance.Collection[-1 * A_Index].Some_Header, SomePattern)
+     *              return 1 ; I've found what I needed, so now I direct `ParseCsv` to return.
+     *      }
+     *  }
      * @
      * @property {Integer} [CollectionArrayBuffer=1000] - When set, and when the current number of
      * records exceeds the length of the array, `ParseCsv` will add this number to the array's
@@ -624,6 +594,12 @@ class ParseCsv {
         }
     }
 
+    GetPattern() {
+        this.Pattern1 := Format('JS)(?<={2}|^)(?:""|"(*COMMIT)(?<value>.*?)(?<!")(?:"")*"|(?<value>[^{1}{2}]*))(?={1})', this.Params.FieldDelimiter, this.Params.RecordDelimiter)
+        this.Pattern2 := Format('JS){1}(?:""|"(?<value>.*?)(?<!")(?:"")*"|(?<value>[^{1}{2}]*))(?={1}|$(*MARK:end))', this.Params.FieldDelimiter, this.Params.RecordDelimiter)
+        this.Pattern3 := Format('JS){1}(?:""|"(?<value>.*?)(?<!")(?:"")*"|(?<value>[^{1}{2}]*))(?={2}|$(*MARK:end))', this.Params.FieldDelimiter, this.Params.RecordDelimiter)
+    }
+
     /**
      * @description - Loops the CSV between IndexStart and IndexEnd. For each record, combines the
      * fields into a string separated by a delimiter. If joining multiple records, the records
@@ -732,58 +708,159 @@ class ParseCsv {
      * but necessary for correctly handling quoted fields. This is used when `QuoteChar` is set.
      */
     LoopReadQuote() {
-        local Params := this.Params, Pattern := this.Pattern, BPA := Params.BreakpointAction, Collection := this.Collection
-        , LastMatch
+        local Params := this.Params, Pattern1 := this.Pattern1, Pattern2 := this.Pattern2
+        , Pattern3 := this.Pattern3
+        , BPA := Params.BreakpointAction, Collection := this.Collection
+        , LastMatch, LoopLen := this.Headers.Length
+        , LenRecordDelimiter := StrLen(Params.RecordDelimiter)
+        , flag_beginning := true
         if Params.Breakpoint {
-            Loop Params.Breakpoint {
-                if RegExMatch(this.content, Pattern, &match, this.CharPos) {
-                    if match.mark == 'end' {
-                        if this.HasOwnProp('File') && this.File.AtEOF {
-                            _Process()
+            i := 0
+            loop {
+                fields := []
+                fields.Capacity := LoopLen
+                i++
+                loop LoopLen {
+                    if A_Index == 1 {
+                        if !RegExMatch(this.Content, Pattern1, &Match, this.CharPos) {
+                            if this.HasOwnProp('File') {
+                                if this.File.AtEOF || this.File.Pos + LenRecordDelimiter >= this.File.Length {
+                                    this.__Add(Fields)
+                                    return
+                                } else {
+                                    this.__Add(Fields)
+                                    _Read()
+                                }
+                            } else {
+                                if this.CharPos + LenRecordDelimiter >= StrLen(this.ContenT) {
+                                    return
+                                } else {
+                                    throw Error('Failed to match.', -1)
+                                }
+                            }
+                        }
+                        if flag_beginning {
+                            if Match.Pos !== this.CharPos {
+                                throw Error('Position is invalid.', -1)
+                            }
+                            flag_beginning := false
+                        } else {
+                            if Match.Pos !== this.CharPos + LenRecordDelimiter {
+                                throw Error('Position is invalid.', -1)
+                            }
+                        }
+                    } else if A_Index < LoopLen {
+                        if !RegExMatch(this.Content, Pattern2, &Match, this.CharPos) {
+                            throw Error('Failed to match', -1)
+                        }
+                        if Match.Pos !== this.CharPos {
+                            throw Error('Position is invalid.', -1)
+                        }
+                    } else {
+                        if !RegExMatch(this.Content, Pattern3, &Match, this.CharPos) {
+                            throw Error('Failed to match', -1)
+                        }
+                        if Match.Pos !== this.CharPos {
+                            throw Error('Position is invalid.', -1)
+                        }
+                    }
+                    this.CharPos := Match.Pos + Match.Len
+                    Lastmatch := Match
+                    fields.Push(Match['value'])
+                    if Match.Mark == 'end' {
+                        if this.HasOwnProp('File') {
+                            if this.File.AtEOF {
+                                this.__Add(Fields)
+                                return
+                            } else {
+                                this.__Add(Fields)
+                                _Read()
+                            }
+                        } else {
+                            this.__Add(Fields)
                             return
-                        } else
-                            _Read()
-                    } else
-                        _Process()
-                    LastMatch := match
-                } else
-                    _Read()
-            }
-            if not BPA is Func || BPA(this) {
-                this.Paused := true
-                return
+                        }
+                    }
+                }
+                this.__Add(Fields)
+                if i == Params.Breakpoint {
+                    i := 0
+                    if not BPA is Func || BPA(this) {
+                        this.Paused := true
+                        return
+                    }
+                }
             }
         } else {
-            while RegExMatch(this.content, Pattern, &match, this.CharPos) {
-                if match.mark == 'end' {
-                    if !this.HasOwnProp('File') || this.File.AtEOF {
-                        _Process()
-                        return
-                    } else
-                        _Read()
-                } else
-                    _Process()
-                LastMatch := match
+            loop {
+                fields := []
+                fields.Capacity := LoopLen
+                loop LoopLen {
+                    if A_Index == 1 {
+                        if !RegExMatch(this.Content, Pattern1, &Match, this.CharPos) {
+                            if this.HasOwnProp('File') {
+                                if this.File.AtEOF || this.File.Pos + LenRecordDelimiter >= this.File.Length {
+                                    this.__Add(Fields)
+                                    return
+                                } else {
+                                    this.__Add(Fields)
+                                    _Read()
+                                }
+                            } else {
+                                if this.CharPos + LenRecordDelimiter >= StrLen(this.ContenT) {
+                                    return
+                                } else {
+                                    throw Error('Failed to match.', -1)
+                                }
+                            }
+                        }
+                        if flag_beginning {
+                            if Match.Pos !== this.CharPos {
+                                throw Error('Position is invalid.', -1)
+                            }
+                            flag_beginning := false
+                        } else {
+                            if Match.Pos !== this.CharPos + LenRecordDelimiter {
+                                throw Error('Position is invalid.', -1)
+                            }
+                        }
+                    } else if A_Index < LoopLen {
+                        if !RegExMatch(this.Content, Pattern2, &Match, this.CharPos) {
+                            throw Error('Failed to match', -1)
+                        }
+                        if Match.Pos !== this.CharPos {
+                            throw Error('Position is invalid.', -1)
+                        }
+                    } else {
+                        if !RegExMatch(this.Content, Pattern3, &Match, this.CharPos) {
+                            throw Error('Failed to match', -1)
+                        }
+                        if Match.Pos !== this.CharPos {
+                            throw Error('Position is invalid.', -1)
+                        }
+                    }
+                    this.CharPos := Match.Pos + Match.Len
+                    Lastmatch := Match
+                    fields.Push(Match['value'])
+                    if Match.Mark == 'end' {
+                        if this.HasOwnProp('File') {
+                            if this.File.AtEOF {
+                                this.__Add(Fields)
+                                return
+                            } else {
+                                this.__Add(Fields)
+                                _Read()
+                            }
+                        } else {
+                            this.__Add(Fields)
+                            return
+                        }
+                    }
+                }
+                this.__Add(Fields)
             }
-            _Read()
-        }
-        _Process() {
-            if match.Pos != this.CharPos
-                this.__ThrowInvalidInputError(this.CharPos, Match.pos, 'ParseCsv.Prototype.LoopReadQuote'
-                , A_LineFile, A_ScriptFullPath)
-            Fields := [], Fields.Length := this.RecordLength
-            loop this.RecordLength {
-                if SubStr(match[A_Index], 1, 1) == this.Params.QuoteChar && SubStr(match[A_Index], -1, 1) == this.Params.QuoteChar
-                    Fields[A_Index] :=  SubStr(match[A_Index], 2, match.Len[A_Index] - 2)
-                else
-                    Fields[A_Index] := match[A_Index]
-            }
-            this.__Add(Fields)
-            this.CharPos := match.Pos + match.len
         }
         _Read() {
-            if !this.HasOwnProp('File')
-                return
             this.File.Pos -= StrPut(SubStr(this.Content, LastMatch.pos + LastMatch.len + 1), Params.Encoding||'UTF-8')
             this.ReadNextQuote()
         }
@@ -969,7 +1046,7 @@ class ParseCsv {
 
         this.RecordLength := this.Headers.Length
         if this.ReadStyle == 'Quote'
-            this.Pattern := ParseCsv.GetPattern(Params.QuoteChar, Params.FieldDelimiter, Params.RecordDelimiter, this.RecordLength)
+            this.Pattern := this.GetPattern()
 
         _SetHeadersLoopReadQuote() {
             PatternHeader := Format('JS)(?:{1}(?<value>(?:[^{1}]*+(?:{1}{1})*+)*+){1}|'
@@ -977,6 +1054,7 @@ class ParseCsv {
             , Params.QuoteChar, Params.FieldDelimiter
             , Params.RecordDelimiter ? RegExReplace(Params.RecordDelimiter, '\\[rnR]|`r|`n', '') : ''
             , Params.RecordDelimiter ? StrReplace(StrReplace(Params.RecordDelimiter, '`n', '\n'), '`r', '\r') : '[\r\n]+')
+
             headers := [], pos := 1
             while RegExMatch(this.Content, PatternHeader, &match, pos) {
                 if match.Pos != pos {
@@ -1085,7 +1163,7 @@ class ParseCsv {
     /**
      * @description Handles the production of records. When `Constructor` is set, this method is overridden
      */
-    __MakeRecord(RecordArray, *) {
+    __MakeRecord(RecordArray) {
         ObjSetBase(Rec := Map(), this.BaseObj)
         Rec.SetList(RecordArray)
         return Rec
@@ -1169,8 +1247,8 @@ class ParseCsv {
         SetList(Values) {
             Headers := this.Headers
             if Values.Length !== Headers.Length
-                throw ValueError('The number of items in the Record array is not the same as the'
-                ' number of headers.', -1, 'Number of items: ' Values.Length)
+                throw ValueError('The number of items in the Record array is not the same as the number of headers.'
+                , -1, 'Number of items: ' Values.Length)
             for Item in Values
                 this.Set(Headers[A_Index], Item ?? '')
         }
