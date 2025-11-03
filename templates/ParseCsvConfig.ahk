@@ -1,32 +1,30 @@
 ﻿
-class ParseCsvConfig {
-    static Breakpoint := unset
-    static BreakpointAction := unset
-    static CollectionArrayBuffer := unset
-    static Constructor := unset
-    static Encoding := unset
-    static FieldDelimiter := unset
-    static Headers := unset
-    static MaxReadSizeBytes := unset
-    static PathIn := unset
-    static QuoteChar := unset
-    static RecordDelimiter := unset
-    static Start := unset
+parseCsvOpt := {
+    Breakpoint: 0
+  , BreakpointAction: ''
+  , Constructor: ''
+  , Encoding: 'cp1200'
+  , FieldDelimiter: ','
+  , FieldsContainRecordDelimiter: false
+  , Headers: ''
+  , InitialCapacity: 1000
+  , PathIn: ''
+  , QuoteChar: ''
+  , RecordDelimiter: ''
+  , Start: true
 }
 
-/*
-
-Options := {
-    Breakpoint: unset
-  , BreakpointAction: unset
-  , CollectionArrayBuffer: unset
-  , Constructor: unset
-  , Encoding: unset
-  , FieldDelimiter: unset
-  , Headers: unset
-  , MaxReadSizeBytes: unset
-  , PathIn: unset
-  , QuoteChar: unset
-  , RecordDelimiter: unset
-  , Start: unset
+class ParseCsvConfig {
+    static Breakpoint := 0
+    static BreakpointAction := ''
+    static Constructor := ''
+    static Encoding := 'cp1200'
+    static FieldDelimiter := ','
+    static FieldsContainRecordDelimiter := false
+    static Headers := ''
+    static InitialCapacity := 1000
+    static PathIn := ''
+    static QuoteChar := ''
+    static RecordDelimiter := ''
+    static Start := true
 }
