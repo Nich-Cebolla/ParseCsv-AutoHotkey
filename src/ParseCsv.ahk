@@ -10,7 +10,7 @@ class ParseCsv extends Array {
         proto := this.Prototype
         proto.InputString := false
         proto.File := proto.ReadStyle := proto.OnExitFunc := ''
-        proto.FileStartByte := proto.Index := proto.ParsedChars := proto.RecordDelimiterLen := 0
+        proto.FileStartByte := proto.Index := proto.ParsedChars := proto.RecordDelimiterLen := proto.ContentLen := 0
         proto.ReadChars := 250
         proto.BytesToCharRatio := 1
         proto.ErrorMessage := [
@@ -105,7 +105,8 @@ class ParseCsv extends Array {
     /**
      * @param {Object} [Options] - An object with options as property : value pairs. The following
      * are notes regarding the options your code will most likely need to set.
-     * - `Options.RecordDelimiter` is required.
+     * - `Options.RecordDelimiter` is required. Set this to the string that separates the records,
+     *   usually "`n" or "`r`n".
      * - `Options.FieldDelimiter` has a default value of a comma ( , ); if your csv has fields that
      *   are separated by something other than a comma, set `Options.FieldDelimiter` with the string
      *   that separates the fields.
@@ -113,7 +114,16 @@ class ParseCsv extends Array {
      *   `InputString`.
      * - `Options.Encoding` must be the correct encoding.
      *
-     * @param {String} [InputString] - A string to parse. If not set, the file at `Options.PathIn` is used.
+     * @param {String} [InputString] - A string to parse. If not set, the file at `Options.PathIn` is
+     * used. When the following conditions are true, {@link ParseCsv} creates a temporary file in
+     * %TEMP% (A_Temp) and reads it back into memory incementally when parsing.
+     * - `InputString` is set.
+     * - `Options.QuoteChar` is set.
+     * - `Options.FieldsContainRecordDelimiter` is nonzero.
+     *
+     * The file will be deleted when {@link ParseCsv} completed, and an `OnExit` callback is set
+     * to delete the file in the event the script exits before {@link ParseCsv} completes. The
+     * `OnExit` callback is disabled after the file is deleted.
      *
      * @param {Integer} [Options.Breakpoint] - Sets a threshold directing {@link ParseCsv} to pause
      * processing after processing `Options.Breakpoint` number of records. When using
@@ -176,7 +186,7 @@ class ParseCsv extends Array {
      * If unset, the default constructor {@link ParseCsv.RecordConstructor} is used, which returns
      * {@link ParseCsv.Record} objects.
      *
-     * @param {string} [Options.Encoding = "cp1200"] - The encoding of the file.
+     * @param {string} [Options.Encoding = ""] - The encoding of the file.
      *
      * @param {string} [Options.FieldDelimiter = ","] - The string that separates fields. For example,
      * a comma.
@@ -223,6 +233,7 @@ class ParseCsv extends Array {
             this.ReadStyle := 'Quote'
             if options.FieldsContainRecordDelimiter {
                 if IsSet(InputString) {
+                    this.ContentLen := StrLen(InputString)
                     options.PathIn := ParseCsv.GetPath()
                     f := FileOpen(options.PathIn, 'w', options.Encoding)
                     f.Write(InputString)
@@ -235,6 +246,7 @@ class ParseCsv extends Array {
                 this.InputString := true
             }
         } else if IsSet(InputString) {
+            this.ContentLen := StrLen(InputString)
             this.ReadStyle := 'Split'
             this.Content := StrSplit(InputString, options.RecordDelimiter)
             this.InputString := true
@@ -704,6 +716,33 @@ class ParseCsv extends Array {
             default: throw ValueError(this.ErrorMessage[3], , this.ReadStyle)
         }
     }
+    Join(&OutStr, recordDelimiter?, fieldDelimiter?, includeHeaders := false) {
+        if !IsSet(recordDelimiter) {
+            recordDelimiter := this.Options.RecordDelimiter
+        }
+        if !IsSet(fieldDelimiter) {
+            fieldDelimiter := this.Options.fieldDelimiter
+        }
+        headers := this.Headers
+        loopLen := headers.Length - 1
+        if includeHeaders {
+            OutStr .= headers[1]
+            i := 1
+            loop loopLen {
+                OutStr .= fieldDelimiter headers[++i]
+            }
+        }
+        OutStr .= recordDelimiter
+        for record in this {
+            OutStr .= record[1]
+            i := 1
+            loop loopLen {
+                OutStr .= fieldDelimiter record[++i]
+            }
+            OutStr .= recordDelimiter
+        }
+        OutStr := SubStr(OutStr, 1, -StrLen(recordDelimiter))
+    }
     /**
      * Generates a string representing a function that returns the records as an array of objects with
      * a property for each header. The following data shows a comparison between the amount of time
@@ -900,6 +939,8 @@ class ParseCsv extends Array {
         bp := options.Breakpoint || this.__LargeBreakpoint
         if bpa := options.BreakpointAction {
             breakCondition := !IsObject(bpa)
+        } else {
+            breakCondition := true
         }
         loop {
             loop bp {
@@ -1181,10 +1222,16 @@ class ParseCsv extends Array {
                 throw TypeError('``Options.Headers`` must be an array of strings.')
             }
             switch this.ReadStyle, 0 {
-                case 'Line': this.File := FileOpen(options.PathIn, 'r', options.encoding)
+                case 'Line':
+                    this.File := FileOpen(options.PathIn, 'r', options.encoding)
+                    pos := this.File.Pos
+                    this.File.Read(1)
+                    ratio := this.File.Pos - pos
+                    this.File.Pos := pos
+                    this.ContentLen := (this.File.Length - pos) / ratio
                 case 'Split':
                     if !this.InputString {
-                        this.Content := StrSplit(FileRead(options.PathIn, options.encoding), options.RecordDelimiter)
+                        _OpenFileSplit()
                     }
                     this.Index := 0
                 case 'Quote':
@@ -1192,7 +1239,7 @@ class ParseCsv extends Array {
                         _OpenFile()
                     } else if this.parse_quote_split {
                         if !this.InputString {
-                            this.Content := StrSplit(FileRead(options.PathIn, options.encoding), options.RecordDelimiter)
+                            _OpenFileSplit()
                         }
                         this.Index := 0
                     }
@@ -1201,10 +1248,15 @@ class ParseCsv extends Array {
             switch this.ReadStyle, 0 {
                 case 'Line':
                     this.File := FileOpen(options.PathIn, 'r', options.encoding)
+                    pos := this.File.Pos
+                    this.File.Read(1)
+                    ratio := this.File.Pos - pos
+                    this.File.Pos := pos
+                    this.ContentLen := (this.File.Length - pos) / ratio
                     this.Headers := StrSplit(this.File.ReadLine(), options.FieldDelimiter)
                 case 'Split':
                     if !this.InputString {
-                        this.Content := StrSplit(FileRead(options.PathIn, options.encoding), options.RecordDelimiter)
+                        _OpenFileSplit()
                     }
                     this.Headers := StrSplit(this.Content.Delete(1), options.FieldDelimiter)
                     this.Index := 1
@@ -1291,7 +1343,7 @@ class ParseCsv extends Array {
                         this.ParsedChars := parsedChars
                     } else if this.parse_quote_split {
                         if !this.InputString {
-                            this.Content := StrSplit(FileRead(options.PathIn, options.encoding), options.RecordDelimiter)
+                            _OpenFileSplit()
                         }
                         str := this.Content.Delete(1)
                         if RegExMatch(str, pattern1, &match) {
@@ -1340,6 +1392,12 @@ class ParseCsv extends Array {
             this.File.Read(1)
             this.BytesToCharRatio := this.File.Pos - pos
             this.File.Pos := pos
+            this.ContentLen := (this.File.Length - pos) / this.BytesToCharRatio
+        }
+        _OpenFileSplit() {
+            content := FileRead(options.PathIn, options.encoding)
+            this.ContentLen := StrLen(content)
+            this.Content := StrSplit(content, options.RecordDelimiter)
         }
         _Throw(context) {
             err := Error(this.ErrorMessage[1], -1, this.ErrorContext[context] ' Near char: ' parsedChars '; Record: headers; After field ' headers.Length)
@@ -1493,7 +1551,7 @@ class ParseCsv extends Array {
             proto.Breakpoint := 0
             proto.BreakpointAction := ''
             proto.Constructor := ''
-            proto.Encoding := 'cp1200'
+            proto.Encoding := ''
             proto.FieldDelimiter := ','
             proto.FieldsContainRecordDelimiter := false
             proto.Headers := ''

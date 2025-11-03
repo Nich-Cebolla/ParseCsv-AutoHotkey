@@ -14,6 +14,7 @@ if !A_IsCompiled && A_LineFile = A_ScriptFullPath {
       , fieldDelimiter: [ ',', ',,', ',./' ]
       , recordDelimiter: [ '`n', '`r`n', ';', ';;]', ';\-' ]
       , fieldsContainRecordDelimiter: [ false ]
+      , encoding: [ 'utf-8', 'cp1200' ]
     })
 }
 
@@ -78,44 +79,47 @@ class test {
         OnExit(this.OnExitFunc, 1)
         generateCsvOpt.PathOut := parseCsvOpt.PathIn := path
         i := 0
-        for quoteChar in options.quoteChar {
-            generateCsvOpt.quoteChar := parseCsvOpt.quoteChar := quoteChar
-            for breakpoint in options.breakpoint {
-                parseCsvOpt.breakpoint := breakpoint
-                for row in options.row {
-                    generateCsvOpt.Rows := row
-                    for breakpointAction in options.breakpointAction {
-                        parseCsvOpt.breakpointAction := breakpointAction
-                        for fieldDelimiter in options.fieldDelimiter {
-                            generateCsvOpt.fieldDelimiter := parseCsvOpt.fieldDelimiter := fieldDelimiter
-                            for recordDelimiter in options.recordDelimiter {
-                                generateCsvOpt.recordDelimiter := parseCsvOpt.recordDelimiter := recordDelimiter
-                                for fieldsContainRecordDelimiter in options.fieldsContainRecordDelimiter {
-                                    ++i
-                                    OutputDebug(i '`n')
-                                    generateCsvOpt.RandomRecordDelimiters := generateCsvOpt.RandomLineEnding := parseCsvOpt.fieldsContainRecordDelimiter := fieldsContainRecordDelimiter
-                                    csv := GenerateCsv(generateCsvOpt)
-                                    pcsv := ParseCsv(parseCsvOpt)
-                                    if quoteChar && pcsv.ParsedChars != csv.ContentLen {
-                                        throw Error('Invalid content length.', , 'Generated: ' csv.ContentLen '; Parsed: ' pcsv.ParsedChars)
-                                    }
-                                    if csv.Headers.Length != pcsv.Headers.Length {
-                                        throw Error('Invalid number of headers.', , 'Generated: ' csv.Headers.Length '; Parsed: ' pcsv.Headers.Length)
-                                    }
-                                    loop csv.Headers.Length {
-                                        if csv.Headers[A_Index] != pcsv.Headers[A_Index] {
-                                            throw Error('Mismatched headers.', , 'Generated: ' csv.Headers[A_Index] '; Parsed: ' pcsv.Headers[A_Index])
+        for encoding in options.encoding {
+            generateCsvOpt.encoding := parseCsvOpt.encoding := encoding
+            for quoteChar in options.quoteChar {
+                generateCsvOpt.quoteChar := parseCsvOpt.quoteChar := quoteChar
+                for breakpoint in options.breakpoint {
+                    parseCsvOpt.breakpoint := breakpoint
+                    for row in options.row {
+                        generateCsvOpt.Rows := row
+                        for breakpointAction in options.breakpointAction {
+                            parseCsvOpt.breakpointAction := breakpointAction
+                            for fieldDelimiter in options.fieldDelimiter {
+                                generateCsvOpt.fieldDelimiter := parseCsvOpt.fieldDelimiter := fieldDelimiter
+                                for recordDelimiter in options.recordDelimiter {
+                                    generateCsvOpt.recordDelimiter := parseCsvOpt.recordDelimiter := recordDelimiter
+                                    for fieldsContainRecordDelimiter in options.fieldsContainRecordDelimiter {
+                                        ++i
+                                        OutputDebug(i '`n')
+                                        generateCsvOpt.RandomRecordDelimiters := generateCsvOpt.RandomLineEnding := parseCsvOpt.fieldsContainRecordDelimiter := fieldsContainRecordDelimiter
+                                        csv := GenerateCsv(generateCsvOpt)
+                                        pcsv := ParseCsv(parseCsvOpt)
+                                        if quoteChar && pcsv.ParsedChars != csv.ContentLen {
+                                            throw Error('Invalid content length.', , 'Generated: ' csv.ContentLen '; Parsed: ' pcsv.ParsedChars)
                                         }
-                                    }
-                                    if pcsv.Length != csv.Records.Length {
-                                        throw Error('Invalid number of records.', , 'Generated: ' csv.Records.Length '; Parsed: ' pcsv.Length)
-                                    }
-                                    loop pcsv.Length {
-                                        parsed := pcsv[A_Index]
-                                        generated := csv.Records[A_Index]
-                                        loop parsed.Length {
-                                            if parsed[A_Index] != generated[A_Index] {
-                                                throw Error('Mismatched fields.', , 'Generated: ' generated[A_Index] '; Parsed: ' parsed[A_Index])
+                                        if csv.Headers.Length != pcsv.Headers.Length {
+                                            throw Error('Invalid number of headers.', , 'Generated: ' csv.Headers.Length '; Parsed: ' pcsv.Headers.Length)
+                                        }
+                                        loop csv.Headers.Length {
+                                            if csv.Headers[A_Index] != pcsv.Headers[A_Index] {
+                                                throw Error('Mismatched headers.', , 'Generated: ' csv.Headers[A_Index] '; Parsed: ' pcsv.Headers[A_Index])
+                                            }
+                                        }
+                                        if pcsv.Length != csv.Records.Length {
+                                            throw Error('Invalid number of records.', , 'Generated: ' csv.Records.Length '; Parsed: ' pcsv.Length)
+                                        }
+                                        loop pcsv.Length {
+                                            parsed := pcsv[A_Index]
+                                            generated := csv.Records[A_Index]
+                                            loop parsed.Length {
+                                                if parsed[A_Index] != generated[A_Index] {
+                                                    throw Error('Mismatched fields.', , 'Generated: ' generated[A_Index] '; Parsed: ' parsed[A_Index])
+                                                }
                                             }
                                         }
                                     }
