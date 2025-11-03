@@ -31,6 +31,7 @@ class test {
      * @param {String[]} options.fieldDelimiter - An array of field delimiters.
      * @param {String[]} options.recordDelimiter - An array of record delimiters.
      * @param {Boolean[]} options.fieldsContainRecordDelimiter - An array of true / false.
+     * @param {String[]} options.encoding - An array of file encoding strings.
      */
     static Call(options) {
 
