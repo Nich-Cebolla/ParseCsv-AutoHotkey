@@ -12,6 +12,26 @@ This rewrite mostly impacts internal logic. Most importantly, the performance wh
 with quoted fields has been improved significantly. There are also changes to some options and
 methods. I updated the documentation in src\ParseCsv.ahk to be accurate to v2.0.0.
 
+The following are test results using a 67MB sample file with 232965 records of 18 columns each.
+`ParseCsv` has four internal processes it uses to parse the content. It selects the optimal process
+automatically based on the input options.
+- `ParseCsv.Prototype.__ParseLine` - 1.08 seconds
+  - This process is used when `Options.QuoteChar` is unset, content source is from file
+    (not input string), no quoted fields, record delimiter is a newline character / substring.
+- `ParseCsv.Prototype.__ParseQuoteIncremental` - 16.26 seconds
+  - This process is used when `Options.QuoteChar` is set, and `Options.FieldsContainRecordDelimiter`
+    is true.
+- `ParseCsv.Prototype.__ParseQuoteSplit` - 18.12 seconds
+  - This process is used when `Options.QuoteChar` is set, and `Options.FieldsContainRecordDelimiter`
+    is false.
+- `ParseCsv.Prototype.__ParseSplit` - 1.44 seconds
+  - This process is used when `Options.QuoteChar` is unset and either of the following:
+    - Content source is from an input string.
+    - Record delimiter is something other than a newline character / substring.
+
+For large files, altering the csv to remove quoted fields (while still maintaining valid csv syntax)
+improves performance significantly.
+
 # Tested methods
 
 Items marked with X have been tested and verified to work as expected.
@@ -26,6 +46,7 @@ Items marked with X have been tested and verified to work as expected.
 |  FindF                    |             |
 |  FindR                    |             |
 |  GetProgress              |      X      |
+|  Join                     |      X      |
 |  ToAhkCode                |      X      |
 
 # Changelog
